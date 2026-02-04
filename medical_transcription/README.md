@@ -50,26 +50,46 @@ Transcribes Hebrew medical conversations (doctor-patient dialogues) with:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    STEP 3: GPT-5.2 MERGE                            │
 │         Combine accurate text + correct speaker identification      │
-│         Medical terms → English | Speaker labels → Hebrew           │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                STEP 4: MERGE ALL CHUNKS                             │
+│                    STEP 4: MERGE ALL CHUNKS                         │
 │         Algorithmic overlap detection (no content loss)             │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                STEP 5: SPELLING CORRECTION                          │
-│         GPT-5.2 fixes Hebrew spelling/semantic errors               │
-│         Examples: עזות→הזעות, עקומול→אקמול, הרמונית→ערמונית        │
+│             STEP 5: POST-PROCESSING PIPELINE (5 Stages)             │
+├─────────────────────────────────────────────────────────────────────┤
+│  Stage A: Deterministic Normalization (no LLM)                      │
+│           - Normalize whitespace, punctuation                       │
+│           - Fix speaker tag formatting                              │
+│           - Standardize medical term format (PET CT → PET-CT)       │
+├─────────────────────────────────────────────────────────────────────┤
+│  Stage B: Dictionary Spelling Fixes (no LLM)                        │
+│           - Apply curated Hebrew spelling corrections               │
+│           - Only exact/near-exact matches from safe dictionary      │
+├─────────────────────────────────────────────────────────────────────┤
+│  Stage C: Deduplication (no LLM)                                    │
+│           - Remove exact duplicate consecutive lines                │
+│           - Remove near-duplicate blocks (85% similarity)           │
+├─────────────────────────────────────────────────────────────────────┤
+│  Stage D: Semantic Fix (constrained LLM)                            │
+│           - Fix grammar only, no entity changes                     │
+│           - Cannot modify numbers or medical terms                  │
+├─────────────────────────────────────────────────────────────────────┤
+│  Stage E: Validation (no LLM)                                       │
+│           - Verify numbers preserved                                │
+│           - Verify medical terms preserved                          │
+│           - Check speaker tag sanity                                │
+│           - Flag any hallucinations                                 │
 └─────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                       FINAL OUTPUT                                   │
-│                  final_transcription.txt                            │
+│         final_transcription.txt + postprocess_report.json           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -177,6 +197,14 @@ The system automatically fixes common GPT-Audio errors in Hebrew:
 ## 📝 Output Files
 - `final_transcription.txt` - The complete corrected transcription
 - `metadata.json` - Processing info (duration, chunks, timestamp)
+- `postprocess_report.json` - Audit trail with:
+  - Number of normalizations (Stage A)
+  - Spelling replacements with line numbers (Stage B)
+  - Duplicates removed (Stage C)
+  - Semantic corrections (Stage D)
+  - Validation warnings (Stage E)
+  - Medical terms before/after
+  - Numbers before/after
 - `chunks/` - Individual chunk transcriptions (for long audio)
 - `metrics.json` - Evaluation metrics (if ground_truth exists)
 

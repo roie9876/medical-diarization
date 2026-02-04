@@ -21,6 +21,7 @@ from pydub import AudioSegment
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from evaluation import calculate_all_metrics, format_metrics_report
+from postprocess import PostProcessor, format_report as format_postprocess_report
 
 load_dotenv()
 
@@ -445,14 +446,23 @@ class MedicalTranscriber:
         
         total_time = (datetime.now() - start_time).total_seconds()
         
-        # Step 4: Fix spelling and semantic errors
-        print(f"\n🔧 Fixing spelling and semantic errors...")
-        final_text = self._fix_spelling_errors(final_text)
-        print(f"   ✅ Fixed ({len(final_text)} chars)")
+        # Post-processing pipeline (5 stages)
+        print(f"\n🔧 POST-PROCESSING PIPELINE")
+        print(f"   Stage A: Normalization...")
+        print(f"   Stage B: Dictionary spelling fixes...")
+        print(f"   Stage C: Deduplication...")
+        print(f"   Stage D: Semantic fixes (LLM)...")
+        print(f"   Stage E: Validation...")
+        
+        postprocessor = PostProcessor(self.gpt52_client)
+        final_text, pp_report = postprocessor.process(final_text, use_llm=True)
+        
+        print(f"\n{format_postprocess_report(pp_report)}")
         
         # Build result
         result = {
             "final_transcription": final_text,
+            "postprocess_report": pp_report,
             "metadata": {
                 "audio_path": audio_path,
                 "duration_minutes": duration_min,
@@ -471,6 +481,23 @@ class MedicalTranscriber:
             
             with open(os.path.join(output_dir, "metadata.json"), "w", encoding="utf-8") as f:
                 json.dump(result["metadata"], f, indent=2, ensure_ascii=False)
+            
+            # Save postprocess report
+            pp_report_dict = {
+                "stage_a_changes": len(pp_report.stage_a_changes),
+                "stage_b_replacements": [(old, new, line) for old, new, line in pp_report.stage_b_replacements],
+                "stage_c_duplicates_removed": pp_report.stage_c_duplicates_removed,
+                "stage_c_duplicate_lines": pp_report.stage_c_duplicate_lines,
+                "stage_d_corrections": pp_report.stage_d_corrections,
+                "stage_e_warnings": pp_report.stage_e_warnings,
+                "validation_passed": pp_report.validation_passed,
+                "numbers_before_count": len(pp_report.stage_e_numbers_before),
+                "numbers_after_count": len(pp_report.stage_e_numbers_after),
+                "medical_terms_before": list(pp_report.stage_e_medical_terms_before),
+                "medical_terms_after": list(pp_report.stage_e_medical_terms_after),
+            }
+            with open(os.path.join(output_dir, "postprocess_report.json"), "w", encoding="utf-8") as f:
+                json.dump(pp_report_dict, f, indent=2, ensure_ascii=False)
             
             # Save chunk details if chunked
             if total_chunks > 1:

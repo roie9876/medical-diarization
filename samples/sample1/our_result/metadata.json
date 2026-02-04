@@ -2,6 +2,6 @@
   "audio_path": "/Users/robenhai/medical diarization/samples/sample1/audio.mp3",
   "duration_minutes": 19.303616666666667,
   "num_chunks": 6,
-  "timestamp": "2026-02-04T12:41:17.288351",
-  "processing_time_seconds": 206.569489
+  "timestamp": "2026-02-04T13:12:53.401601",
+  "processing_time_seconds": 210.122473
 }
