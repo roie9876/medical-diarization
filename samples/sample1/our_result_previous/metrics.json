@@ -1,7 +1,7 @@
 {
-  "character_accuracy": 0.4745,
-  "word_error_rate": 0.3589,
-  "word_accuracy": 0.6411,
+  "character_accuracy": 0.4297,
+  "word_error_rate": 0.3776,
+  "word_accuracy": 0.6224,
   "medical_terms": {
     "terms_in_reference": [
       "PE",
@@ -23,5 +23,5 @@
     "reference_turns": 0,
     "hypothesis_turns": 0
   },
-  "combined_score": 0.6262
+  "combined_score": 0.6008
 }

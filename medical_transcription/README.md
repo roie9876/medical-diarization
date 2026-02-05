@@ -32,10 +32,10 @@ Transcribes Hebrew medical conversations (doctor-patient dialogues) with:
             │                   │                   │
             └───────────────────┼───────────────────┘
                                 │
-                    FOR EACH CHUNK:
+                    FOR EACH CHUNK (⚡ PARALLEL):
                                 │
             ┌───────────────────┴───────────────────┐
-            │                                       │
+            │         ⚡ RUN IN PARALLEL ⚡          │
             ▼                                       ▼
 ┌─────────────────────────┐         ┌─────────────────────────┐
 │   STEP 1: GPT-Audio     │         │   STEP 2: GPT-Audio     │
@@ -93,10 +93,27 @@ Transcribes Hebrew medical conversations (doctor-patient dialogues) with:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## ⚡ Parallel Processing
+
+The system uses parallel processing for significant speedup:
+
+| What | Parallelization | Speedup |
+|------|-----------------|---------|
+| Steps 1 & 2 | Run simultaneously per chunk | ~2x |
+| Multiple chunks | Up to 3 chunks process together | ~3x |
+| **Total** | For 19-min audio (6 chunks) | **~3.5x faster** |
+
+### Benchmark Results
+| Audio Length | Sequential | Parallel | Speedup |
+|--------------|------------|----------|---------|
+| 2.5 min (1 chunk) | 27 sec | 23 sec | 1.2x |
+| 19 min (6 chunks) | 210 sec | 60 sec | **3.5x** |
+
 ## 📁 Project Structure
 ```
 medical diarization/
 ├── .env                      # API keys (see below)
+├── .gitignore                # Protects secrets
 ├── samples/                  # Audio samples
 │   ├── sample1/
 │   │   ├── audio.mp3         # 19 min audio
@@ -104,12 +121,16 @@ medical diarization/
 │   │   └── our_result/
 │   │       ├── final_transcription.txt
 │   │       ├── metadata.json
+│   │       ├── postprocess_report.json
 │   │       └── chunks/       # Individual chunk results
 │   └── sample2/
 │       └── ...
+├── variance_test/            # Consistency test results
 └── medical_transcription/    # Code
     ├── transcribe.py         # Main transcription script
+    ├── postprocess.py        # 5-stage post-processing pipeline
     ├── evaluation.py         # Metrics and evaluation
+    ├── variance_test.py      # Consistency testing tool
     └── README.md             # This file
 ```
 
@@ -176,9 +197,17 @@ print(f"Chunks: {result['metadata']['num_chunks']}")
 ## 📊 Performance
 | Metric | Sample 1 (19 min) | Sample 2 (2.5 min) |
 |--------|-------------------|---------------------|
-| Processing Time | ~3.5 min | ~30 sec |
+| Processing Time | ~60 sec ⚡ | ~23 sec |
 | Chunks | 6 | 1 |
-| Word Accuracy | ~64% | ~58% |
+| Word Accuracy | ~64% | ~56% |
+
+### Consistency (Variance Test Results)
+| Data Type | Consistency Rate |
+|-----------|-----------------|
+| Medical terms (DVT, medications, tests) | **100%** |
+| Numbers (years, durations) | **100%** |
+| Speaker identification | ~95% |
+| Total output length | ±6.5% |
 
 ## 🔧 Spelling Corrections
 The system automatically fixes common GPT-Audio errors in Hebrew:

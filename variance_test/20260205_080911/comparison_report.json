@@ -1,0 +1,28 @@
+{
+  "timestamp": "20260205_080911",
+  "num_runs": 3,
+  "sample": "samples/sample2/audio.mp3",
+  "results": [
+    {
+      "run": 1,
+      "time": 26.500962,
+      "chars": 1746,
+      "lines": 34
+    },
+    {
+      "run": 2,
+      "time": 28.596492,
+      "chars": 1793,
+      "lines": 34
+    },
+    {
+      "run": 3,
+      "time": 24.485039,
+      "chars": 1683,
+      "lines": 32
+    }
+  ],
+  "consistent_points": 11,
+  "inconsistent_points": 5,
+  "consistency_rate": 68.75
+}
