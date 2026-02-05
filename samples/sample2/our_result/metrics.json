@@ -1,7 +1,7 @@
 {
-  "character_accuracy": 0.2825,
-  "word_error_rate": 0.4145,
-  "word_accuracy": 0.5855,
+  "character_accuracy": 0.2244,
+  "word_error_rate": 0.4377,
+  "word_accuracy": 0.5623,
   "medical_terms": {
     "terms_in_reference": [
       "DVT",
@@ -14,9 +14,7 @@
       "Euthyrox",
       "Lipitor"
     ],
-    "unconverted_hebrew": [
-      "כולסטרול should be Cholesterol"
-    ],
+    "unconverted_hebrew": [],
     "english_term_count": 4
   },
   "diarization": {
@@ -26,5 +24,5 @@
     "reference_turns": 32,
     "hypothesis_turns": 0
   },
-  "combined_score": 0.4772
+  "combined_score": 0.4447
 }

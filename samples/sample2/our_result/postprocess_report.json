@@ -1,5 +1,5 @@
 {
-  "stage_a_changes": 33,
+  "stage_a_changes": 32,
   "stage_b_replacements": [],
   "stage_c_duplicates_removed": 1,
   "stage_c_duplicate_lines": [
@@ -8,18 +8,18 @@
   "stage_d_corrections": [],
   "stage_e_warnings": [],
   "validation_passed": true,
-  "numbers_before_count": 1,
-  "numbers_after_count": 1,
+  "numbers_before_count": 2,
+  "numbers_after_count": 2,
   "medical_terms_before": [
     "Euthyrox",
-    "Ultrasound",
     "Lipitor",
-    "DVT"
+    "DVT",
+    "Ultrasound"
   ],
   "medical_terms_after": [
     "Euthyrox",
-    "Ultrasound",
     "Lipitor",
-    "DVT"
+    "DVT",
+    "Ultrasound"
   ]
 }

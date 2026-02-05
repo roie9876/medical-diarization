@@ -6,6 +6,7 @@ Three-step approach:
 3. GPT-5.2: Smart merge - combine best of both
 
 Supports long audio files by chunking with overlap.
+Parallel processing for improved speed.
 """
 
 import os
@@ -14,6 +15,7 @@ import base64
 import json
 import tempfile
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 from pydub import AudioSegment
@@ -364,22 +366,27 @@ class MedicalTranscriber:
         return completion.choices[0].message.content
     
     def transcribe_chunk(self, audio_path: str, chunk_num: int, total_chunks: int) -> dict:
-        """Transcribe a single audio chunk using the three-step approach"""
+        """Transcribe a single audio chunk using the three-step approach
+        
+        Steps 1 and 2 run in PARALLEL for ~2x speedup
+        """
         
         print(f"\n   📍 Chunk {chunk_num}/{total_chunks}")
         
         audio_format = os.path.splitext(audio_path)[1][1:].lower() or "mp3"
         audio_base64 = self.encode_audio(audio_path)
         
-        # Step 1: Pure transcription
-        print(f"      Step 1: Pure transcription...")
-        pure_text = self._call_audio_pure_transcription(audio_base64, audio_format)
+        # Steps 1 & 2 run in PARALLEL (independent API calls)
+        print(f"      Steps 1 & 2: Pure + Diarization (parallel)...")
         
-        # Step 2: Diarization
-        print(f"      Step 2: Diarization...")
-        diarized_text = self._call_audio_with_diarization(audio_base64, audio_format)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_pure = executor.submit(self._call_audio_pure_transcription, audio_base64, audio_format)
+            future_diarized = executor.submit(self._call_audio_with_diarization, audio_base64, audio_format)
+            
+            pure_text = future_pure.result()
+            diarized_text = future_diarized.result()
         
-        # Step 3: Merge
+        # Step 3: Merge (must wait for 1 & 2)
         print(f"      Step 3: Merge...")
         merged_text = self._call_gpt52_merge(pure_text, diarized_text)
         
@@ -429,11 +436,32 @@ class MedicalTranscriber:
             
             print(f"\n🔄 Processing {total_chunks} chunk(s)...")
             
-            # Process each chunk
+            # Process chunks - can parallelize if multiple chunks
             chunk_results = []
-            for i, (chunk_path, start_ms, end_ms, is_last) in enumerate(chunks, 1):
-                result = self.transcribe_chunk(chunk_path, i, total_chunks)
+            if total_chunks == 1:
+                # Single chunk - process directly
+                chunk_path, start_ms, end_ms, is_last = chunks[0]
+                result = self.transcribe_chunk(chunk_path, 1, total_chunks)
                 chunk_results.append(result)
+            else:
+                # Multiple chunks - process in parallel batches
+                # Note: We limit concurrency to avoid overwhelming the API
+                MAX_PARALLEL_CHUNKS = 3  # Process up to 3 chunks simultaneously
+                
+                print(f"   ⚡ Parallel processing enabled (max {MAX_PARALLEL_CHUNKS} concurrent)")
+                
+                with ThreadPoolExecutor(max_workers=MAX_PARALLEL_CHUNKS) as executor:
+                    # Submit all chunks
+                    future_to_idx = {}
+                    for i, (chunk_path, start_ms, end_ms, is_last) in enumerate(chunks, 1):
+                        future = executor.submit(self.transcribe_chunk, chunk_path, i, total_chunks)
+                        future_to_idx[future] = i - 1  # Store original index
+                    
+                    # Collect results in order
+                    chunk_results = [None] * total_chunks
+                    for future in as_completed(future_to_idx):
+                        idx = future_to_idx[future]
+                        chunk_results[idx] = future.result()
             
             # Merge all chunk transcriptions
             if total_chunks > 1:
