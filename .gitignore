@@ -48,10 +48,21 @@ env/
 ehthumbs.db
 Thumbs.db
 
-# Audio files (large)
-# *.mp3
-# *.wav
-# *.m4a
+# Audio files - SENSITIVE medical data
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.ogg
+*.wma
+
+# Transcription results and outputs - SENSITIVE
+samples/*/our_result/
+samples/*/our_result_previous/
+samples/*/other_system_result.txt
+
+# Variance test outputs
+variance_test/
 
 # Temporary files
 *.tmp
@@ -61,6 +72,3 @@ tmp/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
-
-# Test outputs (optional - uncomment if you don't want to track results)
-# samples/*/our_result/
