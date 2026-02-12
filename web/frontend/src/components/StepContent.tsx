@@ -165,7 +165,7 @@ function groupIntoHunks(diffs: LineDiff[], _newLines?: string[]): { hunks: Chang
 
 interface WordToken { text: string; kind: "equal" | "added" | "removed" }
 
-function wordHighlight(oldLine: string, newLine: string): { oldTokens: WordToken[]; newTokens: WordToken[] } {
+function wordHighlight(oldLine: string, newLine: string): { oldTokens: WordToken[]; newTokens: WordToken[]; similarity: number } {
   const ow = oldLine.split(/(\s+)/);
   const nw = newLine.split(/(\s+)/);
   const m = ow.length, n = nw.length;
@@ -174,6 +174,7 @@ function wordHighlight(oldLine: string, newLine: string): { oldTokens: WordToken
     return {
       oldTokens: [{ text: oldLine, kind: "removed" }],
       newTokens: [{ text: newLine, kind: "added" }],
+      similarity: 0,
     };
   }
 
@@ -185,10 +186,12 @@ function wordHighlight(oldLine: string, newLine: string): { oldTokens: WordToken
   const oldTokens: WordToken[] = [];
   const newTokens: WordToken[] = [];
   let i = 0, j = 0;
+  let equalCount = 0;
   while (i < m && j < n) {
     if (ow[i] === nw[j]) {
       oldTokens.push({ text: ow[i], kind: "equal" });
       newTokens.push({ text: nw[j], kind: "equal" });
+      if (ow[i].trim()) equalCount++;
       i++; j++;
     } else if ((dp[i+1]?.[j] ?? 0) >= (dp[i]?.[j+1] ?? 0)) {
       oldTokens.push({ text: ow[i], kind: "removed" });
@@ -200,7 +203,12 @@ function wordHighlight(oldLine: string, newLine: string): { oldTokens: WordToken
   }
   while (i < m) oldTokens.push({ text: ow[i++], kind: "removed" });
   while (j < n) newTokens.push({ text: nw[j++], kind: "added" });
-  return { oldTokens, newTokens };
+
+  // Compute similarity: % of non-whitespace tokens that are equal
+  const totalNonWs = nw.filter(w => w.trim()).length || 1;
+  const similarity = equalCount / totalNonWs;
+
+  return { oldTokens, newTokens, similarity };
 }
 
 /* ── Component ──────────────────────────────────────────────────────── */
@@ -365,70 +373,106 @@ export default function StepContent({ currentStep, previousStep }: Props) {
 function renderHunkChanges(changes: LineDiff[]) {
   const elements: React.ReactNode[] = [];
 
-  // Pair up consecutive removed+added as "changed" lines for word-level highlight
   let i = 0;
   while (i < changes.length) {
-    const c = changes[i];
+    // Collect consecutive removed lines
+    const removedBatch: LineDiff[] = [];
+    while (i < changes.length && changes[i].kind === "removed") {
+      removedBatch.push(changes[i]);
+      i++;
+    }
+    // Collect consecutive added lines
+    const addedBatch: LineDiff[] = [];
+    while (i < changes.length && changes[i].kind === "added") {
+      addedBatch.push(changes[i]);
+      i++;
+    }
 
-    if (c.kind === "removed" && i + 1 < changes.length && changes[i + 1].kind === "added") {
-      // Paired change: show word-level diff
-      const removed = c;
-      const added = changes[i + 1];
-      const { oldTokens, newTokens } = wordHighlight(removed.oldText || "", added.newText || "");
+    // Pair them up: min(R, A) pairs get word-level highlight
+    const pairs = Math.min(removedBatch.length, addedBatch.length);
 
+    for (let p = 0; p < pairs; p++) {
+      const removed = removedBatch[p];
+      const added = addedBatch[p];
+      const { oldTokens, newTokens, similarity } = wordHighlight(removed.oldText || "", added.newText || "");
+
+      if (similarity >= 0.6) {
+        // HIGH SIMILARITY: show as single inline line (new text with highlights)
+        // Merge: show the new text, with removed words struck-through inline and added words highlighted
+        elements.push(
+          <div key={`inline-${added.lineNum}-${p}`} className="hunk-line hunk-inline" dir="rtl">
+            <span className="hunk-line-num">{added.lineNum}</span>
+            <span className="hunk-line-prefix">~</span>
+            <span className="hunk-line-text">
+              {renderInlineDiff(oldTokens, newTokens)}
+            </span>
+          </div>,
+        );
+      } else {
+        // LOW SIMILARITY: show as separate removed/added lines
+        elements.push(
+          <div key={`r-${removed.oldLineNum}-${p}`} className="hunk-line hunk-removed" dir="rtl">
+            <span className="hunk-line-num">{removed.oldLineNum}</span>
+            <span className="hunk-line-prefix">−</span>
+            <span className="hunk-line-text">
+              {oldTokens.map((tok, ti) =>
+                tok.kind === "removed" ? (
+                  <span key={ti} className="hw-removed">{tok.text}</span>
+                ) : (
+                  <span key={ti}>{tok.text}</span>
+                ),
+              )}
+            </span>
+          </div>,
+        );
+        elements.push(
+          <div key={`a-${added.lineNum}-${p}`} className="hunk-line hunk-added" dir="rtl">
+            <span className="hunk-line-num">{added.lineNum}</span>
+            <span className="hunk-line-prefix">+</span>
+            <span className="hunk-line-text">
+              {newTokens.map((tok, ti) =>
+                tok.kind === "added" ? (
+                  <span key={ti} className="hw-added">{tok.text}</span>
+                ) : (
+                  <span key={ti}>{tok.text}</span>
+                ),
+              )}
+            </span>
+          </div>,
+        );
+      }
+    }
+
+    // Remaining unpaired removed lines
+    for (let r = pairs; r < removedBatch.length; r++) {
+      const c = removedBatch[r];
       elements.push(
-        <div key={`r-${i}`} className="hunk-line hunk-removed" dir="rtl">
-          <span className="hunk-line-num">{removed.oldLineNum}</span>
-          <span className="hunk-line-prefix">−</span>
-          <span className="hunk-line-text">
-            {oldTokens.map((tok, ti) =>
-              tok.kind === "removed" ? (
-                <span key={ti} className="hw-removed">{tok.text}</span>
-              ) : (
-                <span key={ti}>{tok.text}</span>
-              ),
-            )}
-          </span>
-        </div>,
-      );
-      elements.push(
-        <div key={`a-${i}`} className="hunk-line hunk-added" dir="rtl">
-          <span className="hunk-line-num">{added.lineNum}</span>
-          <span className="hunk-line-prefix">+</span>
-          <span className="hunk-line-text">
-            {newTokens.map((tok, ti) =>
-              tok.kind === "added" ? (
-                <span key={ti} className="hw-added">{tok.text}</span>
-              ) : (
-                <span key={ti}>{tok.text}</span>
-              ),
-            )}
-          </span>
-        </div>,
-      );
-      i += 2;
-    } else if (c.kind === "removed") {
-      elements.push(
-        <div key={`r-${i}`} className="hunk-line hunk-removed" dir="rtl">
+        <div key={`r-${c.oldLineNum}-${r}`} className="hunk-line hunk-removed" dir="rtl">
           <span className="hunk-line-num">{c.oldLineNum}</span>
           <span className="hunk-line-prefix">−</span>
           <span className="hunk-line-text">{c.oldText || "\u00A0"}</span>
         </div>,
       );
-      i++;
-    } else if (c.kind === "added") {
+    }
+
+    // Remaining unpaired added lines
+    for (let a = pairs; a < addedBatch.length; a++) {
+      const c = addedBatch[a];
       elements.push(
-        <div key={`a-${i}`} className="hunk-line hunk-added" dir="rtl">
+        <div key={`a-${c.lineNum}-${a}`} className="hunk-line hunk-added" dir="rtl">
           <span className="hunk-line-num">{c.lineNum}</span>
           <span className="hunk-line-prefix">+</span>
           <span className="hunk-line-text">{c.newText || "\u00A0"}</span>
         </div>,
       );
-      i++;
-    } else {
-      // equal line inside a hunk gap
+    }
+
+    // If we consumed removed/added batches, continue — otherwise handle equal/other
+    if (removedBatch.length === 0 && addedBatch.length === 0) {
+      // Must be an equal line inside a hunk gap
+      const c = changes[i];
       elements.push(
-        <div key={`e-${i}`} className="hunk-line hunk-context" dir="rtl">
+        <div key={`e-${c.lineNum}-${i}`} className="hunk-line hunk-context" dir="rtl">
           <span className="hunk-line-num">{c.lineNum}</span>
           <span className="hunk-line-text">{c.newText || "\u00A0"}</span>
         </div>,
@@ -438,4 +482,44 @@ function renderHunkChanges(changes: LineDiff[]) {
   }
 
   return <>{elements}</>;
+}
+
+/**
+ * Render a single inline line showing both removed and added tokens merged.
+ * Walk both token lists in document order: equal text is plain,
+ * removed text is struck-through, added text is highlighted.
+ */
+function renderInlineDiff(oldTokens: WordToken[], newTokens: WordToken[]): React.ReactNode[] {
+  const result: React.ReactNode[] = [];
+  let oi = 0, ni = 0;
+  let key = 0;
+
+  // Both token lists share the same "equal" tokens as anchors.
+  // Walk them in parallel, emitting removed/added between equals.
+  while (oi < oldTokens.length || ni < newTokens.length) {
+    // Emit removed tokens until we hit an equal in old
+    while (oi < oldTokens.length && oldTokens[oi].kind === "removed") {
+      result.push(<del key={key++} className="hw-inline-removed">{oldTokens[oi].text}</del>);
+      oi++;
+    }
+    // Emit added tokens until we hit an equal in new
+    while (ni < newTokens.length && newTokens[ni].kind === "added") {
+      result.push(<mark key={key++} className="hw-inline-added">{newTokens[ni].text}</mark>);
+      ni++;
+    }
+    // Emit matching equal token from new side
+    if (ni < newTokens.length && newTokens[ni].kind === "equal") {
+      result.push(<span key={key++}>{newTokens[ni].text}</span>);
+      ni++;
+      oi++; // skip the corresponding equal in old
+    } else if (oi < oldTokens.length && oldTokens[oi].kind === "equal") {
+      // Safety: if somehow out of sync
+      result.push(<span key={key++}>{oldTokens[oi].text}</span>);
+      oi++;
+    } else {
+      break; // both exhausted
+    }
+  }
+
+  return result;
 }

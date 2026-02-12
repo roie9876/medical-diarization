@@ -1,10 +1,91 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { StepDetail } from "../types";
 
 interface Props {
   steps: StepDetail[];
   selectedIndex: number;
   onSelect: (index: number) => void;
+}
+
+/* ── Hebrew step explanations with examples ─────────────────────────── */
+
+interface StepTooltip {
+  title: string;
+  desc: string;
+  example?: string;
+}
+
+const STEP_TOOLTIPS: Record<string, StepTooltip> = {
+  step_0: {
+    title: "חלוקת אודיו לקטעים",
+    desc: "מפצל את הקובץ לקטעים של 4 דקות עם חפיפה של 30 שניות, כדי לעבד כל קטע בנפרד.",
+    example: "קובץ של 20 דקות → 6 קטעים עם חפיפה",
+  },
+  step_1: {
+    title: "תמלול טהור (GPT-Audio)",
+    desc: "תמלול מילה-במילה בלי זיהוי דוברים. מתמקד בדיוק הטקסט — שמות תרופות, מספרים, מונחים רפואיים באנגלית.",
+    example: '...לוקח אקמול 500 מ"ג פעמיים ביום, ויש לו DVT...',
+  },
+  step_2: {
+    title: "תמלול עם זיהוי דוברים (GPT-Audio)",
+    desc: "תמלול עם תיוג של מי אמר מה. הטקסט פחות מדויק, אבל זיהוי הדוברים טוב יותר.",
+    example: "[דובר 1]: מה הסיבה שהגעת?\n[דובר 2]: כאבים בחזה כבר שבוע.",
+  },
+  step_3: {
+    title: "מיזוג חכם (GPT-5.2)",
+    desc: "ממזג את שני התמלולים: לוקח את הטקסט המדויק משלב 1 ואת זיהוי הדוברים משלב 2. ממפה דוברים לתפקידים.",
+    example: "[דובר 1] → [רופא]\n[דובר 2] → [מטופל]",
+  },
+  step_4: {
+    title: "איחוד קטעים",
+    desc: "מאחד את כל הקטעים בחזרה לטקסט אחד. משתמש בחפיפה של 30 השניות כדי למצוא את נקודת החיבור ולמנוע כפילויות.",
+    example: "סוף קטע 1: \"...קח את האקמול\"\nתחילת קטע 2: \"קח את האקמול ותחזור...\" → מחובר",
+  },
+  step_5a: {
+    title: "נרמול (דטרמיניסטי)",
+    desc: "תיקוני עיצוב אוטומטיים — בלי LLM. מוסיף נקודתיים אחרי תגית דובר, מכווץ רווחים, מתקן סימני פיסוק, מתקן שמות מונחים.",
+    example: "[רופא] טקסט → [רופא]: טקסט\nPET CT → PET-CT\ntee → TEE",
+  },
+  step_5b: {
+    title: "תיקון איות (מילון)",
+    desc: "מחליף שגיאות כתיב ידועות של GPT בעברית רפואית. רק התאמות מדויקות — ללא ניחושים.",
+    example: "עזות → הזעות\nעקומול → אקמול\nמולטאק → Multaq\nבכום הלב → בקרום הלב",
+  },
+  step_5c: {
+    title: "הסרת כפילויות",
+    desc: "מזהה ומסיר שורות כפולות שנוצרו בתמלול או באיחוד הקטעים. בודק כפילויות מדויקות וגם כפילויות עם דמיון מעל 85%.",
+    example: "[רופא]: מה שלומך?\n[רופא]: מה שלומך? ← מוסר",
+  },
+  step_5d: {
+    title: "תיקון סמנטי (LLM מוגבל)",
+    desc: "GPT-5.2 מתקן דקדוק עברי ומילים שבורות. אסור לו להמציא, לקצר, או לשנות מספרים ומונחים רפואיים.",
+    example: "\"היא אומר שהיא לא מרגיש טוב\"\n→ \"היא אומרת שהיא לא מרגישה טוב\"",
+  },
+  step_5e: {
+    title: "אימות סופי (דטרמיניסטי)",
+    desc: "בודק שכל המספרים והמונחים הרפואיים נשמרו אחרי העיבוד. מזהה הזיות — מונחים חדשים שלא היו במקור.",
+    example: "37.3 נמצא בקלט ✓\nDVT נמצא בקלט ✓\nMRI לא היה במקור ⚠️ הזיה אפשרית",
+  },
+  step_6a: {
+    title: "יצירת סיכום רפואי (GPT-5.2)",
+    desc: "מייצר סיכום רפואי מובנה בעברית מתוך התמלול. כולל: רקע, תלונה עיקרית, בדיקות, המלצות ומרשמים. לא ממציא — שדה חסר מסומן \"לא צוין\".",
+    example: "תלונה עיקרית: כאבים בחזה\nרקע: יל\"ד, סוכרת סוג 2\nתרופות: Ramipril 5mg, Metformin 1000mg",
+  },
+  step_6b: {
+    title: "אימות סיכום רפואי",
+    desc: "בדיקה כפולה — דטרמיניסטית + LLM. מזהה תרופות כפולות (שם מסחרי = גנרי), מינונים חשודים, ומידע שהומצא.",
+    example: "Ramipril + Tritace = כפילות ⚠️\nRamipril 25mg → מינון חשוד (טווח: 1.25-10mg) ⚠️",
+  },
+};
+
+/** Find tooltip for a step ID */
+function getTooltip(stepId: string): StepTooltip | null {
+  // Try exact prefix match (most specific first)
+  const prefixes = Object.keys(STEP_TOOLTIPS).sort((a, b) => b.length - a.length);
+  for (const prefix of prefixes) {
+    if (stepId.startsWith(prefix)) return STEP_TOOLTIPS[prefix];
+  }
+  return null;
 }
 
 /** Colour-code step IDs for visual grouping */
@@ -86,6 +167,34 @@ function formatChunk(chunkIndex: number | null): string {
   return ` (chunk ${chunkIndex + 1})`;
 }
 
+/* ── Tooltip component ──────────────────────────────────────────────── */
+
+function StepTooltipPopup({ tooltip, anchorEl }: { tooltip: StepTooltip; anchorEl: HTMLElement | null }) {
+  if (!anchorEl) return null;
+
+  // Position tooltip to the right of the sidebar
+  const rect = anchorEl.getBoundingClientRect();
+
+  return (
+    <div
+      className="step-tooltip"
+      style={{
+        top: Math.min(rect.top, window.innerHeight - 220),
+        left: rect.right + 8,
+      }}
+    >
+      <div className="step-tooltip-title">{tooltip.title}</div>
+      <div className="step-tooltip-desc">{tooltip.desc}</div>
+      {tooltip.example && (
+        <div className="step-tooltip-example">
+          <span className="step-tooltip-example-label">דוגמה:</span>
+          <pre>{tooltip.example}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StepSidebar({ steps, selectedIndex, onSelect }: Props) {
   const grouped = groupSteps(steps);
 
@@ -99,6 +208,23 @@ export default function StepSidebar({ steps, selectedIndex, onSelect }: Props) {
     }
     return initial;
   });
+
+  // Tooltip hover state
+  const [hoveredStep, setHoveredStep] = useState<{ tooltip: StepTooltip; el: HTMLElement } | null>(null);
+  const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleMouseEnter = (stepId: string, el: HTMLElement) => {
+    if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
+    hoverTimeout.current = setTimeout(() => {
+      const tip = getTooltip(stepId);
+      if (tip) setHoveredStep({ tooltip: tip, el });
+    }, 400); // 400ms delay to avoid flickering
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
+    setHoveredStep(null);
+  };
 
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
@@ -152,6 +278,8 @@ export default function StepSidebar({ steps, selectedIndex, onSelect }: Props) {
                       key={globalIndex}
                       className={`step-item ${globalIndex === selectedIndex ? "selected" : ""}`}
                       onClick={() => onSelect(globalIndex)}
+                      onMouseEnter={(e) => handleMouseEnter(step.step_id, e.currentTarget)}
+                      onMouseLeave={handleMouseLeave}
                     >
                       <span
                         className="step-dot"
@@ -177,6 +305,11 @@ export default function StepSidebar({ steps, selectedIndex, onSelect }: Props) {
           );
         })}
       </div>
+
+      {/* Tooltip popup */}
+      {hoveredStep && (
+        <StepTooltipPopup tooltip={hoveredStep.tooltip} anchorEl={hoveredStep.el} />
+      )}
     </aside>
   );
 }
