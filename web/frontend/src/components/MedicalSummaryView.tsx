@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { MedicalSummaryData } from "../types";
+import ExportPdf from "./ExportPdf";
 
 interface Props {
   runId: string;
@@ -170,6 +171,18 @@ export default function MedicalSummaryView({ runId }: Props) {
 
   return (
     <div className="medical-summary-view">
+      {/* Export button */}
+      {data?.summary && (
+        <div className="summary-export-bar">
+          <ExportPdf
+            summaryText={data.summary}
+            runId={runId}
+            faithfulnessScore={report?.faithfulness_score}
+            validationPassed={report?.validation_passed}
+          />
+        </div>
+      )}
+
       {/* Validation banner */}
       {report && (
         <div className={`summary-validation-banner ${report.validation_passed ? "passed" : "failed"}`}>
