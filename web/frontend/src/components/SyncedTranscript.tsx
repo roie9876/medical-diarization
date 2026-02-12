@@ -49,47 +49,65 @@ export default function SyncedTranscript({ runId, audioRef }: Props) {
   }, [runId]);
 
   // Sync highlight to audio currentTime
-  const onTimeUpdate = useCallback(() => {
-    if (!words || !audioRef.current) return;
-    const ms = audioRef.current.currentTime * 1000;
-
-    // Binary search for the current word
-    let lo = 0,
-      hi = words.length - 1,
-      best = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (words[mid].start_ms <= ms) {
-        best = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
+  // Find the word index at a given timestamp (ms) via binary search
+  const findWordAtMs = useCallback(
+    (ms: number): number => {
+      if (!words) return -1;
+      let lo = 0,
+        hi = words.length - 1,
+        best = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (words[mid].start_ms <= ms) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
       }
-    }
-    // Verify the word's end hasn't passed
-    if (best >= 0 && words[best].end_ms < ms) {
-      // We're in a gap between words — keep the last word lit briefly
-      if (ms - words[best].end_ms > 500) best = -1;
-    }
-
-    if (best !== activeIdx) {
-      setActiveIdx(best);
-      // Scroll into view
-      if (best >= 0 && wordRefs.current[best]) {
-        wordRefs.current[best]!.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-        });
+      // Verify the word's end hasn't passed
+      if (best >= 0 && words[best].end_ms < ms) {
+        if (ms - words[best].end_ms > 500) best = -1;
       }
-    }
-  }, [words, activeIdx, audioRef]);
+      return best;
+    },
+    [words],
+  );
+
+  const syncHighlight = useCallback(
+    (scrollBehavior: ScrollBehavior = "smooth") => {
+      if (!words || !audioRef.current) return;
+      const ms = audioRef.current.currentTime * 1000;
+      const best = findWordAtMs(ms);
+
+      if (best !== activeIdx) {
+        setActiveIdx(best);
+        if (best >= 0 && wordRefs.current[best]) {
+          wordRefs.current[best]!.scrollIntoView({
+            behavior: scrollBehavior,
+            block: "center",
+          });
+        }
+      }
+    },
+    [words, activeIdx, audioRef, findWordAtMs],
+  );
+
+  const onTimeUpdate = useCallback(() => syncHighlight("smooth"), [syncHighlight]);
+
+  // On seek (scrubbing), jump instantly — no smooth scroll lag
+  const onSeeked = useCallback(() => syncHighlight("instant" as ScrollBehavior), [syncHighlight]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !words) return;
     audio.addEventListener("timeupdate", onTimeUpdate);
-    return () => audio.removeEventListener("timeupdate", onTimeUpdate);
-  }, [audioRef, words, onTimeUpdate]);
+    audio.addEventListener("seeked", onSeeked);
+    return () => {
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("seeked", onSeeked);
+    };
+  }, [audioRef, words, onTimeUpdate, onSeeked]);
 
   // Click word → seek audio
   const handleWordClick = (idx: number) => {
@@ -108,8 +126,8 @@ export default function SyncedTranscript({ runId, audioRef }: Props) {
         <div className="synced-body">
           <div className="synced-loading">
             <div className="synced-spinner" />
-            <p>Azure STT is processing the audio at real-time speed.</p>
-            <p className="subtle">For 20 min audio, this takes ~20 min. This page will update automatically.</p>
+            <p>Azure Fast Transcription is processing the audio.</p>
+            <p className="subtle">This usually completes in 1–3 minutes. This page will update automatically.</p>
           </div>
         </div>
       </div>

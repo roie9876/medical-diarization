@@ -24,6 +24,7 @@ from pydub import AudioSegment
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from evaluation import calculate_all_metrics, format_metrics_report
 from postprocess import PostProcessor, format_report as format_postprocess_report
+from medical_summary import MedicalSummaryGenerator, format_summary_report
 from trace import PipelineTrace
 from stt_timestamps import transcribe_with_timestamps
 from alignment import align_timestamps
@@ -453,17 +454,17 @@ class MedicalTranscriber:
         # Initialize pipeline trace
         trace = PipelineTrace()
         
-        # Start Azure STT in parallel (for word-level timestamps)
-        # STT runs at real-time speed (~1x audio duration), so we don't wait for it.
-        # Instead, a background thread saves word_timestamps.json when STT finishes.
+        # Start Azure Fast Transcription in parallel (for word-level timestamps)
+        # Fast Transcription API processes faster than real-time (~1-3 min for 20 min audio).
+        # Runs in background thread; saves word_timestamps.json when done.
         stt_future = None
         stt_available = bool(os.getenv("AZURE_SPEECH_KEY")) and bool(os.getenv("AZURE_SPEECH_REGION"))
         if stt_available:
-            print(f"\n🎤 Azure STT: starting word-level timestamp extraction (background)...")
+            print(f"\n🎤 Azure Fast Transcription: starting word-level timestamp extraction (background)...")
             stt_executor = ThreadPoolExecutor(max_workers=1)
             stt_future = stt_executor.submit(transcribe_with_timestamps, audio_path)
         else:
-            print(f"\n⚠️  Azure STT: skipping (AZURE_SPEECH_KEY/REGION not set)")
+            print(f"\n⚠️  Azure Fast Transcription: skipping (AZURE_SPEECH_KEY/REGION not set)")
         
         # Create temp directory for chunks
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -529,12 +530,24 @@ class MedicalTranscriber:
         
         print(f"\n{format_postprocess_report(pp_report)}")
         
+        # Step 6: Medical Summary
+        print(f"\n📋 MEDICAL SUMMARY GENERATION")
+        print(f"   Step 6a: Generating structured summary (LLM)...")
+        print(f"   Step 6b: Validation & quality control...")
+        
+        summary_generator = MedicalSummaryGenerator(self.gpt52_client)
+        medical_summary, summary_report = summary_generator.generate(final_text, trace=trace)
+        
+        print(f"\n{format_summary_report(summary_report)}")
+        
         # Build result (don't wait for STT — it saves asynchronously)
         word_timestamps = None
         
         # Build result
         result = {
             "final_transcription": final_text,
+            "medical_summary": medical_summary,
+            "summary_report": summary_report,
             "postprocess_report": pp_report,
             "trace": trace,
             "word_timestamps": word_timestamps,
@@ -553,6 +566,14 @@ class MedicalTranscriber:
             
             with open(os.path.join(output_dir, "final_transcription.txt"), "w", encoding="utf-8") as f:
                 f.write(final_text)
+            
+            # Save medical summary
+            with open(os.path.join(output_dir, "medical_summary.txt"), "w", encoding="utf-8") as f:
+                f.write(medical_summary)
+            
+            # Save summary validation report
+            with open(os.path.join(output_dir, "summary_report.json"), "w", encoding="utf-8") as f:
+                json.dump(summary_report.to_dict(), f, indent=2, ensure_ascii=False)
             
             with open(os.path.join(output_dir, "metadata.json"), "w", encoding="utf-8") as f:
                 json.dump(result["metadata"], f, indent=2, ensure_ascii=False)

@@ -1,12 +1,17 @@
 """
-Azure Speech Services STT — word-level timestamps.
+Azure Speech Services STT — word-level timestamps via Fast Transcription API.
 
-Sends audio to Azure Speech-to-Text and returns a list of
-{word, offset_ms, duration_ms} for every recognized word.
+Uses the Azure Fast Transcription REST API (synchronous, faster-than-real-time)
+instead of the real-time Speech SDK.  A 20-minute audio file typically completes
+in 1–3 minutes rather than 20.
 
+Returns a list of {word, offset_ms, duration_ms} for every recognized word.
 The text quality is *not* used — we only care about the timestamps.
 The final text comes from the GPT pipeline; we align timestamps to it
 via alignment.py.
+
+API reference:
+  https://learn.microsoft.com/azure/ai-services/speech-service/fast-transcription-create
 """
 
 import os
@@ -14,27 +19,13 @@ import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-import azure.cognitiveservices.speech as speechsdk
+import requests
 from dotenv import load_dotenv
-from pydub import AudioSegment
 
 load_dotenv()
 
-
-def _ensure_wav(audio_path: str) -> str:
-    """Convert to 16 kHz mono WAV if needed (Speech SDK works best with WAV)."""
-    p = Path(audio_path)
-    if p.suffix.lower() == ".wav":
-        return audio_path
-
-    wav_path = p.with_suffix(".stt.wav")
-    if wav_path.exists():
-        return str(wav_path)
-
-    audio = AudioSegment.from_file(audio_path)
-    audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
-    audio.export(str(wav_path), format="wav")
-    return str(wav_path)
+# Fast Transcription API version
+_API_VERSION = "2025-10-15"
 
 
 def transcribe_with_timestamps(
@@ -42,9 +33,19 @@ def transcribe_with_timestamps(
     language: str = "he-IL",
     speech_key: Optional[str] = None,
     speech_region: Optional[str] = None,
+    max_speakers: int = 4,
 ) -> Dict[str, Any]:
     """
-    Run Azure Speech-to-Text on *audio_path* and return word-level timestamps.
+    Run Azure Fast Transcription on *audio_path* and return word-level timestamps.
+
+    This is *much* faster than real-time — a 20-min file finishes in ~1–3 min.
+
+    Args:
+        audio_path:   Path to audio file (mp3, wav, m4a, ogg, flac, …).
+        language:     BCP-47 locale.  Default ``"he-IL"`` for Hebrew.
+        speech_key:   Azure Speech resource key (falls back to env var).
+        speech_region: Azure Speech resource region (falls back to env var).
+        max_speakers: Hint for diarization — maximum number of speakers.
 
     Returns:
         {
@@ -54,7 +55,8 @@ def transcribe_with_timestamps(
             ],
             "stt_text": "שלום ...",          # full STT text (for alignment reference)
             "duration_ms": 62000,             # total audio duration recognized
-            "processing_time_seconds": 12.3,
+            "processing_time_seconds": 3.4,
+            "phrases": [ ... ],              # raw phrases from the API (optional)
         }
     """
     key = speech_key or os.getenv("AZURE_SPEECH_KEY", "")
@@ -62,84 +64,123 @@ def transcribe_with_timestamps(
     if not key or not region:
         raise RuntimeError("AZURE_SPEECH_KEY and AZURE_SPEECH_REGION must be set")
 
-    wav_path = _ensure_wav(audio_path)
-
-    # Configure speech recognizer
-    speech_config = speechsdk.SpeechConfig(subscription=key, region=region)
-    speech_config.speech_recognition_language = language
-    speech_config.request_word_level_timestamps()
-    speech_config.output_format = speechsdk.OutputFormat.Detailed
-
-    audio_config = speechsdk.audio.AudioConfig(filename=wav_path)
-    recognizer = speechsdk.SpeechRecognizer(
-        speech_config=speech_config,
-        audio_config=audio_config,
+    url = (
+        f"https://{region}.api.cognitive.microsoft.com"
+        f"/speechtotext/transcriptions:transcribe"
+        f"?api-version={_API_VERSION}"
     )
 
-    # Collect all results (continuous recognition for long audio)
-    all_words: List[Dict[str, Any]] = []
-    full_text_parts: List[str] = []
-    done = False
-    cancel_error: Optional[str] = None
+    # Build the JSON definition (passed as a form field)
+    import json
+
+    definition = {
+        "locales": [language],
+        "diarization": {
+            "enabled": True,
+            "maxSpeakers": max_speakers,
+        },
+    }
+
+    headers = {
+        "Ocp-Apim-Subscription-Key": key,
+    }
+
     start_time = time.time()
 
-    def _on_recognized(evt: speechsdk.SpeechRecognitionEventArgs):
-        result = evt.result
-        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-            full_text_parts.append(result.text)
-            print(f"   STT chunk: +{len(result.text)} chars, total words so far: ", end="")
+    # POST multipart/form-data: audio file + definition
+    audio_file_path = Path(audio_path)
+    content_type_map = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".m4a": "audio/mp4",
+        ".wma": "audio/x-ms-wma",
+        ".aac": "audio/aac",
+        ".webm": "audio/webm",
+    }
+    audio_content_type = content_type_map.get(
+        audio_file_path.suffix.lower(), "application/octet-stream"
+    )
 
-            # Extract word-level timestamps from detailed JSON
-            import json
-            detailed = json.loads(result.json)
-            best = detailed.get("NBest", [{}])[0]
-            for w in best.get("Words", []):
-                all_words.append({
-                    "word": w.get("Word", ""),
-                    "offset_ms": w.get("Offset", 0) // 10_000,    # 100-ns ticks → ms
-                    "duration_ms": w.get("Duration", 0) // 10_000,
-                })
-            print(f"{len(all_words)}")
+    # Retry with exponential backoff for 429 (throttling) and 5xx errors
+    MAX_RETRIES = 5
+    retry_delay = 10  # seconds
 
-    def _on_canceled(evt: speechsdk.SpeechRecognitionCanceledEventArgs):
-        nonlocal done, cancel_error
-        if evt.reason == speechsdk.CancellationReason.Error:
-            cancel_error = f"STT canceled: code={evt.error_code}, details={evt.error_details}"
-            print(f"   ⚠️  {cancel_error}")
-        done = True
+    for attempt in range(1, MAX_RETRIES + 1):
+        with open(audio_path, "rb") as af:
+            files = {
+                "audio": (audio_file_path.name, af, audio_content_type),
+                "definition": (None, json.dumps(definition), "application/json"),
+            }
+            print(f"   🚀 Fast Transcription API: uploading {audio_file_path.name} …")
+            resp = requests.post(url, headers=headers, files=files, timeout=600)
 
-    def _on_stopped(evt):
-        nonlocal done
-        done = True
+        if resp.status_code == 200:
+            break
 
-    recognizer.recognized.connect(_on_recognized)
-    recognizer.canceled.connect(_on_canceled)
-    recognizer.session_stopped.connect(_on_stopped)
+        if resp.status_code == 429 or resp.status_code >= 500:
+            # Use Retry-After header if available, else exponential backoff
+            wait = int(resp.headers.get("Retry-After", retry_delay))
+            print(
+                f"   ⚠️  {resp.status_code} ({resp.text[:120].strip()}) — "
+                f"retry {attempt}/{MAX_RETRIES} in {wait}s …"
+            )
+            if attempt == MAX_RETRIES:
+                raise RuntimeError(
+                    f"Fast Transcription API error {resp.status_code} after "
+                    f"{MAX_RETRIES} retries: {resp.text[:500]}"
+                )
+            time.sleep(wait)
+            retry_delay = min(retry_delay * 2, 120)  # cap at 2 minutes
+            continue
 
-    recognizer.start_continuous_recognition()
+        # Non-retryable error
+        raise RuntimeError(
+            f"Fast Transcription API error {resp.status_code}: {resp.text[:500]}"
+        )
 
-    # Wait for recognition to finish
-    while not done:
-        time.sleep(0.2)
-
-    recognizer.stop_continuous_recognition()
     processing_time = time.time() - start_time
 
-    # Raise if canceled with error and no words collected
-    if cancel_error and not all_words:
-        raise RuntimeError(cancel_error)
+    data = resp.json()
 
-    # Compute total duration from last word
-    max_end_ms = 0
-    if all_words:
+    # ── Parse response into our standard format ──────────────────────────
+    all_words: List[Dict[str, Any]] = []
+    full_text_parts: List[str] = []
+    total_duration_ms = data.get("durationMilliseconds", 0)
+
+    for phrase in data.get("phrases", []):
+        full_text_parts.append(phrase.get("text", ""))
+        for w in phrase.get("words", []):
+            all_words.append({
+                "word": w["text"],
+                "offset_ms": w["offsetMilliseconds"],
+                "duration_ms": w["durationMilliseconds"],
+            })
+
+    # Also grab the combined text
+    combined = ""
+    for cp in data.get("combinedPhrases", []):
+        combined += cp.get("text", "") + " "
+    stt_text = combined.strip() or " ".join(full_text_parts)
+
+    # If duration not in top-level, compute from last word
+    if not total_duration_ms and all_words:
         last = all_words[-1]
-        max_end_ms = last["offset_ms"] + last["duration_ms"]
+        total_duration_ms = last["offset_ms"] + last["duration_ms"]
+
+    print(
+        f"   ✅ Fast Transcription done: {len(all_words)} words, "
+        f"{total_duration_ms / 1000:.1f}s audio, "
+        f"{processing_time:.1f}s elapsed"
+    )
 
     return {
         "words": all_words,
-        "stt_text": " ".join(full_text_parts),
-        "duration_ms": max_end_ms,
+        "stt_text": stt_text,
+        "duration_ms": total_duration_ms,
         "processing_time_seconds": round(processing_time, 2),
+        "phrases": data.get("phrases", []),
     }
 
 
@@ -154,7 +195,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     path = sys.argv[1]
-    print(f"🎤 Azure STT: {path}")
+    print(f"🎤 Azure Fast Transcription: {path}")
     result = transcribe_with_timestamps(path)
     print(f"   Words: {len(result['words'])}")
     print(f"   Duration: {result['duration_ms'] / 1000:.1f}s")

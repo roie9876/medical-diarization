@@ -207,6 +207,8 @@ PIPELINE_STEP_DEFS = [
     ("step_5c_deduplicated",   "Deduplication"),
     ("step_5d_semantic",       "Semantic Fix (LLM)"),
     ("step_5e_validated",      "Validation (Final)"),
+    ("step_6a_summary_draft",  "Medical Summary (LLM)"),
+    ("step_6b_summary_validation", "Summary Validation"),
 ]
 
 
@@ -412,6 +414,25 @@ def get_word_timestamps(run_id: str):
                 with open(ts_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             raise HTTPException(404, f"No word timestamps for run '{run_id}'")
+    raise HTTPException(404, f"Run '{run_id}' not found")
+
+
+@app.get("/api/runs/{run_id}/medical-summary")
+def get_medical_summary(run_id: str):
+    """Get the medical summary for a pipeline run."""
+    for rid, trace_path in find_trace_files():
+        if rid == run_id:
+            run_dir = trace_path.parent
+            summary_path = run_dir / "medical_summary.txt"
+            report_path = run_dir / "summary_report.json"
+            result = {"summary": None, "report": None}
+            if summary_path.exists():
+                result["summary"] = summary_path.read_text(encoding="utf-8")
+            if report_path.exists():
+                result["report"] = json.loads(report_path.read_text(encoding="utf-8"))
+            if result["summary"] is None:
+                raise HTTPException(404, f"No medical summary for run '{run_id}'")
+            return result
     raise HTTPException(404, f"Run '{run_id}' not found")
 
 

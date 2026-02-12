@@ -13,6 +13,7 @@ Key capabilities:
 - **Long audio support** — splits files >4 minutes into overlapping chunks processed in parallel
 - **Hebrew spelling correction** — fixes common GPT transcription errors with a curated dictionary
 - **Validation & audit trail** — every post-processing change is logged and numbers/terms are verified
+- **Structured medical summary** — auto-generates a Hebrew clinical summary with built-in hallucination detection, medication duplicate detection, and dosage plausibility checks
 - **Pipeline tracing** — captures text state at every processing step for debugging and comparison
 - **Web UI** — upload audio, watch pipeline progress live, browse step-by-step diffs, re-run pipelines
 - **Real-time audio-text sync** — word-level timestamps via Azure Speech Services, with click-to-seek playback
@@ -57,16 +58,25 @@ flowchart TD
         SA --> SB --> SC --> SD --> SE
     end
 
-    I --> J["📄 Output\nfinal_transcription.txt\npostprocess_report.json\nmetrics.json"]
+    I --> K
 
-    A --> STT["🔊 Azure STT\n(background, real-time speed)\nWord-level timestamps"]
+    subgraph K["Step 6 · Medical Summary"]
+        direction TB
+        K1["Step 6a · Summary Generation\n(GPT-5.2, temp=0.1)\nStructured Hebrew clinical summary"]
+        K2["Step 6b · Summary Validation\nDeterministic: duplicate meds,\ndosage plausibility\nLLM: hallucination detection,\nfaithfulness scoring"]
+        K1 --> K2
+    end
+
+    K --> J["📄 Output\nfinal_transcription.txt\nmedical_summary.txt\nsummary_report.json\npostprocess_report.json"]
+
+    A --> STT["🔊 Azure Fast Transcription\n(background, faster than real-time)\nWord-level timestamps"]
     STT --> ALIGN["Alignment\nFuzzy-match STT ↔ GPT text\nword_timestamps.json"]
     ALIGN --> J
 ```
 
 ### STT & Word-Level Timestamps (Background)
 
-In parallel with the main pipeline, the audio is also sent to **Azure Speech Services** for word-level timestamp extraction. This runs as a **background thread** (it processes at real-time speed, so a 20-minute file takes ~20 minutes) and does not block the pipeline. When complete, the timestamps are fuzzy-matched against the final GPT text using `SequenceMatcher` and saved as `word_timestamps.json`. The web UI auto-polls for this file and enables live audio-text sync when it appears.
+In parallel with the main pipeline, the audio is also sent to the **Azure Fast Transcription API** for word-level timestamp extraction. This runs as a **background thread** and processes **faster than real-time** (a 20-minute file typically completes in 1–3 minutes). It does not block the pipeline. When complete, the timestamps are fuzzy-matched against the final GPT text using `SequenceMatcher` and saved as `word_timestamps.json`. The web UI auto-polls for this file and enables live audio-text sync when it appears.
 
 ## Pipeline Steps in Detail
 
@@ -178,6 +188,58 @@ The result is a `PostProcessReport` containing every change, replacement, duplic
 
 ---
 
+## Step 6 — Medical Summary Generation (Detailed)
+
+After post-processing, the pipeline generates a **structured Hebrew medical summary** from the final transcription. This is a two-step process with extensive safety guards.
+
+### Step 6a — Summary Generation (GPT-5.2)
+
+GPT-5.2 (`temperature=0.1`) receives the full transcription and produces a structured summary. The system prompt enforces:
+
+| Section | Content |
+|---------|---------|
+| **רקע דמוגרפי** | Age, gender, family status, residence, occupation |
+| **רקע רפואי** | Background diseases, chronic medications, allergies |
+| **תלונה עיקרית** | Chief complaint (the reason for the visit, not the last topic discussed) |
+| **פרטי המחלה הנוכחית** | History of present illness |
+| **בדיקה גופנית** | Physical examination findings |
+| **תוצאות מעבדה** | Lab results |
+| **דימות ובדיקות עזר** | Imaging and auxiliary tests |
+| **סיכום רפואי של הרופא** | Doctor's assessment |
+| **המלצות** | Recommendations |
+| **מרשמים** | New prescriptions (not chronic meds) |
+
+For any missing field, the model is instructed to write **"לא צוין"** — never fabricate information.
+
+### Step 6b — Summary Validation (Deterministic + LLM)
+
+Two-layer quality control:
+
+#### Layer 1: Deterministic Checks (No LLM)
+
+| Check | Description |
+|-------|-------------|
+| **Medication duplicates** | A dictionary of ~40 brand/generic equivalence groups (e.g., Ramipril=Tritace, Zopiclone=Nocturno, Metformin=Glucophage=Glucomin) detects when the same drug appears under different names |
+| **Dosage plausibility** | Dosage ranges for 40+ medications flag suspicious values (e.g., "Ramipril 11.5mg" → warning: standard range is 1.25–10mg) |
+| **Cross-reference** | Medications in the summary are compared against medications found in the transcript |
+
+#### Layer 2: LLM Validation (GPT-5.2, temperature=0)
+
+| Check | Description |
+|-------|-------------|
+| **Hallucinated medications** | Identifies drugs in the summary that don't appear in the transcript |
+| **Fabricated information** | Detects any data in the summary not grounded in the transcript |
+| **Chief complaint accuracy** | Verifies the chief complaint matches the actual reason for the visit |
+| **Faithfulness score** | 0–10 overall faithfulness rating |
+
+#### Output
+
+- Warnings are injected into the summary under `---אזהרות בקרת איכות---`
+- Saved as `medical_summary.txt` + `summary_report.json`
+- Validation passes if: no hallucinated meds, no fabricated info, chief complaint correct, faithfulness ≥ 7
+
+---
+
 ## Evaluation
 
 When a ground truth file is available, the system calculates:
@@ -204,8 +266,9 @@ When a ground truth file is available, the system calculates:
 ├── src/
 │   └── medical_transcription/
 │       ├── __init__.py
-│       ├── transcribe.py       # Main pipeline orchestrator (Steps 0-5)
+│       ├── transcribe.py       # Main pipeline orchestrator (Steps 0-6)
 │       ├── postprocess.py      # Post-processing stages A-E
+│       ├── medical_summary.py  # Medical summary generation + validation (Step 6)
 │       ├── evaluation.py       # Metrics (WER, char accuracy, etc.)
 │       ├── trace.py            # Pipeline tracing (captures text at every step)
 │       ├── stt_timestamps.py   # Azure Speech Services STT (word-level timestamps)
@@ -291,6 +354,7 @@ The project includes a full-stack web interface for managing and inspecting pipe
 | GET | `/api/runs/{run_id}/audio` | Stream audio file |
 | GET | `/api/runs/{run_id}/has-audio` | Check if audio exists |
 | GET | `/api/runs/{run_id}/word-timestamps` | Get word-level timestamps |
+| GET | `/api/runs/{run_id}/medical-summary` | Get medical summary + validation report |
 | GET | `/api/health` | Health check |
 | POST | `/api/admin/restart-backend` | Restart backend |
 | POST | `/api/admin/restart-frontend` | Restart frontend |
@@ -302,7 +366,7 @@ The project includes a full-stack web interface for managing and inspecting pipe
 
 The `trace.py` module captures a snapshot of the text at every pipeline step:
 
-- **10 step definitions**: `step_0_chunking` → `step_1_pure_transcription` → `step_2_diarized_transcription` → `step_3_merged` → `step_4_chunk_merged` → `step_5a_normalized` → `step_5b_spelling` → `step_5c_deduplicated` → `step_5d_semantic` → `step_5e_validated`
+- **12 step definitions**: `step_0_chunking` → `step_1_pure` → `step_2_diarized` → `step_3_merged` → `step_4_chunks_merged` → `step_5a_normalized` → `step_5b_spelling` → `step_5c_deduplicated` → `step_5d_semantic` → `step_5e_validated` → `step_6a_summary_draft` → `step_6b_summary_validation`
 - Each snapshot records: step index, step name, text content, timestamp, duration
 - Serialized as `trace.json` alongside each run's output
 - The web UI renders these as navigable step-by-step views with text diffs
@@ -315,7 +379,7 @@ The `trace.py` module captures a snapshot of the text at every pipeline step:
 
 1. **Azure Speech Services STT** (`stt_timestamps.py`): Continuous recognition extracts every word with millisecond-precision `start_ms` / `end_ms` timestamps. Converts MP3→WAV (16kHz mono) first.
 2. **Fuzzy Alignment** (`alignment.py`): Uses `SequenceMatcher` to match STT words against the final GPT-processed text. Handles speaker labels, interpolates gaps. Tested at ~73% direct match rate.
-3. **Background Processing**: STT runs as a daemon thread — it processes at real-time speed (20-min audio ≈ 20 min), so it doesn't block the pipeline. When done, it automatically aligns and saves `word_timestamps.json`.
+3. **Background Processing**: STT runs as a daemon thread using the Azure Fast Transcription API (20-min audio ≈ 1–3 min), so it doesn't block the pipeline. When done, it automatically aligns and saves `word_timestamps.json`.
 4. **UI Auto-Polling**: The `SyncedTranscript` component polls every 5 seconds until timestamps are available, then enables word highlighting synchronized to audio playback with click-to-seek.
 
 ### Key Design Decision: Why Azure STT Instead of GPT-Audio Timestamps?
@@ -393,7 +457,7 @@ AZURE_SPEECH_REGION=swedencentral
 openai
 pydub
 python-dotenv
-azure-cognitiveservices-speech
+requests
 fastapi
 uvicorn
 python-multipart
@@ -428,23 +492,25 @@ typescript, vite
        ┌───────────────┼───────────────┐
        │               │               │
        ▼               ▼               ▼
-┌─────────────┐ ┌────────────┐ ┌──────────────┐
-│ transcribe  │ │ postprocess│ │ stt_timestamps│
-│ .py         │ │ .py        │ │ .py          │
-│ Steps 0-4   │ │ Step 5 A-E │ │ (background) │
-│ GPT-Audio   │ │ GPT-5.2    │ │ Azure Speech │
-│ + GPT-5.2   │ │            │ │ + alignment  │
-└─────────────┘ └────────────┘ └──────────────┘
-       │               │               │
-       └───────┬───────┘               │
-               ▼                       ▼
-        output/{run_id}/        word_timestamps.json
-        ├── trace.json          (saved async when ready)
-        ├── final_transcription.txt
-        ├── metadata.json
-        ├── metrics.json
-        ├── postprocess_report.json
-        └── chunks/
+┌─────────────┐ ┌────────────┐ ┌───────────────┐ ┌──────────────┐
+│ transcribe  │ │ postprocess│ │ medical_      │ │ stt_timestamps│
+│ .py         │ │ .py        │ │ summary.py    │ │ .py          │
+│ Steps 0-4   │ │ Step 5 A-E │ │ Step 6a-6b    │ │ (background) │
+│ GPT-Audio   │ │ GPT-5.2    │ │ GPT-5.2       │ │ Azure Speech │
+│ + GPT-5.2   │ │            │ │ + deterministic│ │ + alignment  │
+└─────────────┘ └────────────┘ └───────────────┘ └──────────────┘
+       │               │               │               │
+       └───────┬───────┴───────┬───────┘               │
+               ▼               ▼                       ▼
+          output/{run_id}/                    word_timestamps.json
+          ├── trace.json                      (saved async when ready)
+          ├── final_transcription.txt
+          ├── medical_summary.txt
+          ├── summary_report.json
+          ├── metadata.json
+          ├── metrics.json
+          ├── postprocess_report.json
+          └── chunks/
 ```
 
 ---
@@ -453,12 +519,13 @@ typescript, vite
 
 | File | Purpose | Lines | Notes |
 |------|---------|-------|-------|
-| `src/medical_transcription/transcribe.py` | Main pipeline orchestrator | ~675 | `MedicalTranscriber` class, ThreadPoolExecutor for parallel Steps 1+2, STT background thread |
+| `src/medical_transcription/transcribe.py` | Main pipeline orchestrator | ~690 | `MedicalTranscriber` class, ThreadPoolExecutor for parallel Steps 1+2, STT background thread |
 | `src/medical_transcription/postprocess.py` | Post-processing stages A-E | ~400 | All 5 stages with trace integration |
-| `src/medical_transcription/trace.py` | Pipeline trace data layer | ~177 | `PipelineTrace`, `StepSnapshot`, 10 `STEP_DEFINITIONS` |
+| `src/medical_transcription/medical_summary.py` | Medical summary + validation | ~450 | `MedicalSummaryGenerator`, medication equivalences, dosage ranges, dual-layer validation |
+| `src/medical_transcription/trace.py` | Pipeline trace data layer | ~190 | `PipelineTrace`, `StepSnapshot`, 12 `STEP_DEFINITIONS` |
 | `src/medical_transcription/stt_timestamps.py` | Azure STT continuous recognition | ~150 | `transcribe_with_timestamps()`, MP3→WAV conversion, progress logging |
 | `src/medical_transcription/alignment.py` | Fuzzy word alignment | ~230 | `align_timestamps()`, SequenceMatcher, speaker label handling, gap interpolation |
-| `web/backend/main.py` | FastAPI backend | ~470 | All 15 endpoints, job queue, file serving |
+| `web/backend/main.py` | FastAPI backend | ~500 | All 16 endpoints, job queue, file serving |
 | `web/frontend/src/components/TraceViewer.tsx` | Step trace + Live Sync | ~200 | `audioRef` shared between AudioPlayer and SyncedTranscript |
 | `web/frontend/src/components/SyncedTranscript.tsx` | Word-level audio sync | ~180 | Auto-polls every 5s, binary search for active word, click-to-seek |
 | `web/frontend/src/App.css` | Dark theme styles | ~800 | All component styles including sync animations |

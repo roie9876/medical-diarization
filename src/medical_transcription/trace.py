@@ -45,6 +45,8 @@ STEP_DEFINITIONS = [
     ("step_5c_deduplicated",   "Post-Process: Deduplication"),
     ("step_5d_semantic",       "Post-Process: Semantic Fix (LLM)"),
     ("step_5e_validated",      "Post-Process: Validation (Final)"),
+    ("step_6a_summary_draft",  "Medical Summary: Generation (LLM)"),
+    ("step_6b_summary_validation", "Medical Summary: Validation"),
 ]
 
 STEP_NAME_MAP = dict(STEP_DEFINITIONS)
