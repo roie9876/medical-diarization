@@ -11,8 +11,11 @@ E. Validation (no LLM)
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Set, Tuple, Optional, TYPE_CHECKING
 from difflib import SequenceMatcher
+
+if TYPE_CHECKING:
+    from trace import PipelineTrace
 
 
 # =============================================================================
@@ -90,13 +93,19 @@ class PostProcessor:
         self.gpt52_client = gpt52_client
         self.report = PostProcessReport()
     
-    def process(self, text: str, use_llm: bool = True) -> Tuple[str, PostProcessReport]:
+    def process(
+        self,
+        text: str,
+        use_llm: bool = True,
+        trace: Optional["PipelineTrace"] = None,
+    ) -> Tuple[str, PostProcessReport]:
         """
         Run the full post-processing pipeline
         
         Args:
             text: Raw merged transcription
             use_llm: Whether to use LLM for stage D (default True)
+            trace: Optional PipelineTrace to record intermediate states
         
         Returns:
             Tuple of (processed_text, report)
@@ -108,20 +117,40 @@ class PostProcessor:
         self.report.stage_e_medical_terms_before = self._extract_medical_terms(text)
         
         # Stage A: Deterministic normalization
+        if trace:
+            trace.start_timer("step_5a_normalized")
         text = self._stage_a_normalize(text)
+        if trace:
+            trace.add_step("step_5a_normalized", text)
         
         # Stage B: Dictionary spelling fixes
+        if trace:
+            trace.start_timer("step_5b_spelling")
         text = self._stage_b_spelling(text)
+        if trace:
+            trace.add_step("step_5b_spelling", text)
         
         # Stage C: Deduplication
+        if trace:
+            trace.start_timer("step_5c_deduplicated")
         text = self._stage_c_deduplicate(text)
+        if trace:
+            trace.add_step("step_5c_deduplicated", text)
         
         # Stage D: Semantic fix (LLM)
         if use_llm and self.gpt52_client:
+            if trace:
+                trace.start_timer("step_5d_semantic")
             text = self._stage_d_semantic_fix(text)
+            if trace:
+                trace.add_step("step_5d_semantic", text)
         
         # Stage E: Validation
+        if trace:
+            trace.start_timer("step_5e_validated")
         text = self._stage_e_validate(text)
+        if trace:
+            trace.add_step("step_5e_validated", text)
         
         return text, self.report
     

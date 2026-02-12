@@ -1,0 +1,60 @@
+// Types matching the FastAPI backend models
+
+export interface RunSummary {
+  run_id: string;
+  created_at: string;
+  num_steps: number;
+  num_chunks: number;
+  has_audio: boolean;
+}
+
+export interface StepSummary {
+  index: number;
+  step_id: string;
+  step_name: string;
+  chunk_index: number | null;
+  char_count: number;
+  line_count: number;
+  duration_seconds: number;
+}
+
+export interface StepDetail extends StepSummary {
+  metadata: Record<string, unknown>;
+  text: string;
+}
+
+export interface TraceData {
+  run_id: string;
+  created_at: string;
+  num_chunks: number;
+  total_steps: number;
+  steps: StepDetail[];
+}
+
+export interface PipelineStep {
+  step_id: string;
+  step_name: string;
+  status: "pending" | "running" | "completed";
+}
+
+export interface JobStatus {
+  job_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  run_id?: string;
+  error?: string;
+  progress?: string;
+  current_step?: string;
+  steps: PipelineStep[];
+  audio_filename?: string;
+}
+
+export interface AdminStatus {
+  supervisor_active: boolean;
+  backend_pid: number | null;
+  frontend_pid: number | null;
+}
+
+export interface AudioInfo {
+  has_audio: boolean;
+  filename: string | null;
+}

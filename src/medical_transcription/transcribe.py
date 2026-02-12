@@ -24,6 +24,7 @@ from pydub import AudioSegment
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from evaluation import calculate_all_metrics, format_metrics_report
 from postprocess import PostProcessor, format_report as format_postprocess_report
+from trace import PipelineTrace
 
 # Project root (three levels up from src/medical_transcription/transcribe.py)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -368,7 +369,7 @@ class MedicalTranscriber:
         
         return completion.choices[0].message.content
     
-    def transcribe_chunk(self, audio_path: str, chunk_num: int, total_chunks: int) -> dict:
+    def transcribe_chunk(self, audio_path: str, chunk_num: int, total_chunks: int, trace: PipelineTrace = None) -> dict:
         """Transcribe a single audio chunk using the three-step approach
         
         Steps 1 and 2 run in PARALLEL for ~2x speedup
@@ -376,11 +377,16 @@ class MedicalTranscriber:
         
         print(f"\n   📍 Chunk {chunk_num}/{total_chunks}")
         
+        chunk_idx = chunk_num - 1  # 0-based for trace
         audio_format = os.path.splitext(audio_path)[1][1:].lower() or "mp3"
         audio_base64 = self.encode_audio(audio_path)
         
         # Steps 1 & 2 run in PARALLEL (independent API calls)
         print(f"      Steps 1 & 2: Pure + Diarization (parallel)...")
+        
+        if trace:
+            trace.start_timer("step_1_pure")
+            trace.start_timer("step_2_diarized")
         
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_pure = executor.submit(self._call_audio_pure_transcription, audio_base64, audio_format)
@@ -389,9 +395,20 @@ class MedicalTranscriber:
             pure_text = future_pure.result()
             diarized_text = future_diarized.result()
         
+        if trace:
+            trace.add_step("step_1_pure", pure_text, chunk_index=chunk_idx,
+                           metadata={"model": "gpt-audio", "temperature": 0})
+            trace.add_step("step_2_diarized", diarized_text, chunk_index=chunk_idx,
+                           metadata={"model": "gpt-audio", "temperature": 0.2})
+        
         # Step 3: Merge (must wait for 1 & 2)
         print(f"      Step 3: Merge...")
+        if trace:
+            trace.start_timer("step_3_merged")
         merged_text = self._call_gpt52_merge(pure_text, diarized_text)
+        if trace:
+            trace.add_step("step_3_merged", merged_text, chunk_index=chunk_idx,
+                           metadata={"model": "gpt-5.2-chat"})
         
         print(f"      ✅ Done ({len(merged_text)} chars)")
         
@@ -431,6 +448,9 @@ class MedicalTranscriber:
         
         start_time = datetime.now()
         
+        # Initialize pipeline trace
+        trace = PipelineTrace()
+        
         # Create temp directory for chunks
         with tempfile.TemporaryDirectory() as temp_dir:
             # Split audio if needed
@@ -444,7 +464,7 @@ class MedicalTranscriber:
             if total_chunks == 1:
                 # Single chunk - process directly
                 chunk_path, start_ms, end_ms, is_last = chunks[0]
-                result = self.transcribe_chunk(chunk_path, 1, total_chunks)
+                result = self.transcribe_chunk(chunk_path, 1, total_chunks, trace=trace)
                 chunk_results.append(result)
             else:
                 # Multiple chunks - process in parallel batches
@@ -457,7 +477,7 @@ class MedicalTranscriber:
                     # Submit all chunks
                     future_to_idx = {}
                     for i, (chunk_path, start_ms, end_ms, is_last) in enumerate(chunks, 1):
-                        future = executor.submit(self.transcribe_chunk, chunk_path, i, total_chunks)
+                        future = executor.submit(self.transcribe_chunk, chunk_path, i, total_chunks, trace=trace)
                         future_to_idx[future] = i - 1  # Store original index
                     
                     # Collect results in order
@@ -469,11 +489,16 @@ class MedicalTranscriber:
             # Merge all chunk transcriptions
             if total_chunks > 1:
                 print(f"\n🔄 Merging {total_chunks} chunks (pairwise)...")
+                trace.start_timer("step_4_chunks_merged")
                 chunk_transcriptions = [r["merged"] for r in chunk_results]
                 final_text = self._call_gpt52_merge_chunks(chunk_transcriptions)
+                trace.add_step("step_4_chunks_merged", final_text,
+                               metadata={"num_chunks": total_chunks})
                 print(f"   ✅ Merged ({len(final_text)} chars)")
             else:
                 final_text = chunk_results[0]["merged"]
+                trace.add_step("step_4_chunks_merged", final_text,
+                               metadata={"num_chunks": 1})
         
         total_time = (datetime.now() - start_time).total_seconds()
         
@@ -486,7 +511,7 @@ class MedicalTranscriber:
         print(f"   Stage E: Validation...")
         
         postprocessor = PostProcessor(self.gpt52_client)
-        final_text, pp_report = postprocessor.process(final_text, use_llm=True)
+        final_text, pp_report = postprocessor.process(final_text, use_llm=True, trace=trace)
         
         print(f"\n{format_postprocess_report(pp_report)}")
         
@@ -494,6 +519,7 @@ class MedicalTranscriber:
         result = {
             "final_transcription": final_text,
             "postprocess_report": pp_report,
+            "trace": trace,
             "metadata": {
                 "audio_path": audio_path,
                 "duration_minutes": duration_min,
@@ -529,6 +555,9 @@ class MedicalTranscriber:
             }
             with open(os.path.join(output_dir, "postprocess_report.json"), "w", encoding="utf-8") as f:
                 json.dump(pp_report_dict, f, indent=2, ensure_ascii=False)
+            
+            # Save pipeline trace
+            trace.save(os.path.join(output_dir, "trace.json"))
             
             # Save chunk details if chunked
             if total_chunks > 1:
