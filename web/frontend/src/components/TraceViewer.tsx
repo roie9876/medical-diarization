@@ -5,6 +5,7 @@ import StepSidebar from "./StepSidebar";
 import StepContent from "./StepContent";
 import AudioPlayer from "./AudioPlayer";
 import SyncedTranscript from "./SyncedTranscript";
+import MedicalSummaryView from "./MedicalSummaryView";
 
 interface Props {
   runId: string;
@@ -19,6 +20,7 @@ export default function TraceViewer({ runId, onBack, onRerun }: Props) {
   const [error, setError] = useState("");
   const [rerunning, setRerunning] = useState(false);
   const [showSync, setShowSync] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -85,11 +87,25 @@ export default function TraceViewer({ runId, onBack, onRerun }: Props) {
         <h2>Run: {runId}</h2>
         <AudioPlayer runId={runId} audioRef={audioRef} />
         <button
+          className={`sync-toggle-btn ${!showSync && !showSummary ? "active" : ""}`}
+          onClick={() => { setShowSync(false); setShowSummary(false); }}
+          title="Pipeline steps view"
+        >
+          📝 Steps
+        </button>
+        <button
           className={`sync-toggle-btn ${showSync ? "active" : ""}`}
-          onClick={() => setShowSync((p) => !p)}
+          onClick={() => { setShowSync(true); setShowSummary(false); }}
           title="Toggle live word-sync view"
         >
-          {showSync ? "📝 Steps" : "🔊 Live Sync"}
+          🔊 Live Sync
+        </button>
+        <button
+          className={`sync-toggle-btn ${showSummary ? "active" : ""}`}
+          onClick={() => { setShowSummary(true); setShowSync(false); }}
+          title="Medical summary view"
+        >
+          📋 סיכום רפואי
         </button>
         <button
           className="rerun-btn"
@@ -104,7 +120,11 @@ export default function TraceViewer({ runId, onBack, onRerun }: Props) {
         </span>
       </div>
 
-      {showSync ? (
+      {showSummary ? (
+        <div className="trace-body summary-mode">
+          <MedicalSummaryView runId={runId} />
+        </div>
+      ) : showSync ? (
         <div className="trace-body synced-mode">
           <SyncedTranscript runId={runId} audioRef={audioRef} />
         </div>

@@ -67,3 +67,23 @@ export interface WordTimestamp {
   is_interpolated: boolean;
   line_index: number;
 }
+
+export interface SummaryReport {
+  hallucinated_medications: string[];
+  duplicate_medications: string[][];
+  suspicious_dosages: string[];
+  fabricated_info: string[];
+  chief_complaint_ok: boolean;
+  chief_complaint_note: string;
+  faithfulness_score: number;
+  meds_in_transcript: string[];
+  meds_in_summary: string[];
+  deterministic_duplicate_pairs: string[][];
+  deterministic_dosage_warnings: string[];
+  validation_passed: boolean;
+}
+
+export interface MedicalSummaryData {
+  summary: string;
+  report: SummaryReport | null;
+}

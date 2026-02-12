@@ -15,7 +15,7 @@ Key capabilities:
 - **Validation & audit trail** — every post-processing change is logged and numbers/terms are verified
 - **Structured medical summary** — auto-generates a Hebrew clinical summary with built-in hallucination detection, medication duplicate detection, and dosage plausibility checks
 - **Pipeline tracing** — captures text state at every processing step for debugging and comparison
-- **Web UI** — upload audio, watch pipeline progress live, browse step-by-step diffs, re-run pipelines
+- **Web UI** — upload audio, watch pipeline progress live, browse step-by-step diffs with grouped sidebar and hunk-based change viewer, re-run pipelines
 - **Real-time audio-text sync** — word-level timestamps via Azure Speech Services, with click-to-seek playback
 
 ## Pipeline Overview
@@ -289,8 +289,9 @@ When a ground truth file is available, the system calculates:
 │       │       ├── UploadView.tsx        # Drag-and-drop audio upload
 │       │       ├── RunList.tsx           # Pipeline runs list (with delete)
 │       │       ├── TraceViewer.tsx       # Step trace viewer + Live Sync toggle
-│       │       ├── StepSidebar.tsx       # Step navigation sidebar
-│       │       ├── StepContent.tsx       # Text/diff-split/diff-unified views
+│       │       ├── StepSidebar.tsx       # Grouped & collapsible step navigation sidebar
+│       │       ├── StepContent.tsx       # Text/changes/diff-split/diff-unified views
+│       │       ├── MedicalSummaryView.tsx # Rich medical summary display
 │       │       ├── AudioPlayer.tsx       # Audio playback with shared ref
 │       │       ├── SyncedTranscript.tsx  # Word-level highlighting synced to audio
 │       │       ├── PipelineProgress.tsx  # Live step tracker during processing
@@ -333,11 +334,23 @@ The project includes a full-stack web interface for managing and inspecting pipe
 |---------|-------------|
 | **Upload & Process** | Drag-and-drop audio files, watch live pipeline progress |
 | **Run List** | Browse all past runs with timestamps, delete old runs |
-| **Step Trace Viewer** | See text at every pipeline step, with diff views (split/unified) |
+| **Step Trace Viewer** | See text at every pipeline step, with 4 view modes (see below) |
+| **Grouped Sidebar** | Pipeline steps grouped into collapsible sections (Chunking, Per-Chunk Transcription, Merging, Post-Processing, Medical Summary) with count badges and active-step indicators |
+| **Changes View** | Compact hunk-based change viewer showing only modified regions with context lines, word-level highlighting within changed lines, and change/region counts — compares previous step → current step |
+| **Medical Summary** | Rich formatted display of the medical summary with section icons, validation banner, and quality warnings |
 | **Re-run Pipeline** | One-click re-run from any completed run |
 | **Audio Player** | Built-in player for the original audio |
 | **Live Sync** | Toggle "🔊 Live Sync" to see word-level highlighting synced to audio playback |
 | **Admin Panel** | Restart backend/frontend processes |
+
+### View Modes (Step Trace Viewer)
+
+| Mode | Description |
+|------|-------------|
+| **Text** | Plain text of the current step |
+| **Changes** | Hunk-based diff cards: only the changed regions between the previous and current step are shown, with 2 lines of context. Removed text is red with `−` prefix; added text is green with `+` prefix. Within changed line pairs, specific words that differ are highlighted with a darker background. A badge shows total affected lines. |
+| **Diff (Split)** | Side-by-side full diff (previous step left, current step right) |
+| **Diff (Unified)** | Unified full diff view |
 
 ### API Endpoints
 
@@ -528,4 +541,7 @@ typescript, vite
 | `web/backend/main.py` | FastAPI backend | ~500 | All 16 endpoints, job queue, file serving |
 | `web/frontend/src/components/TraceViewer.tsx` | Step trace + Live Sync | ~200 | `audioRef` shared between AudioPlayer and SyncedTranscript |
 | `web/frontend/src/components/SyncedTranscript.tsx` | Word-level audio sync | ~180 | Auto-polls every 5s, binary search for active word, click-to-seek |
-| `web/frontend/src/App.css` | Dark theme styles | ~800 | All component styles including sync animations |
+| `web/frontend/src/components/StepContent.tsx` | Step text + change views | ~350 | Line-level LCS diff, hunk grouping with context, word-level highlighting within changed line pairs, 4 view modes |
+| `web/frontend/src/components/StepSidebar.tsx` | Grouped step sidebar | ~170 | Collapsible groups (chunking/chunks/transcription/merging/postprocess/summary), count badges, active-dot indicator |
+| `web/frontend/src/components/MedicalSummaryView.tsx` | Medical summary display | ~200 | Section parsing, validation banner, rich formatting |
+| `web/frontend/src/App.css` | Dark theme styles | ~1350 | All component styles including grouped sidebar, hunk-based changes, sync animations, summary view |
