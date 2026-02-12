@@ -13,7 +13,7 @@ Key capabilities:
 - **Long audio support** — splits files >4 minutes into overlapping chunks processed in parallel
 - **Hebrew spelling correction** — fixes common GPT transcription errors with a curated dictionary
 - **Validation & audit trail** — every post-processing change is logged and numbers/terms are verified
-- **Structured medical summary** — auto-generates a Hebrew clinical summary with built-in hallucination detection, medication duplicate detection, and dosage plausibility checks
+- **Structured medical summary** — auto-generates a Hebrew clinical summary with built-in hallucination detection, medication duplicate detection, dosage plausibility checks, ATC medication verification, and ICD condition verification
 - **Pipeline tracing** — captures text state at every processing step for debugging and comparison
 - **Web UI** — upload audio, watch pipeline progress live, browse step-by-step diffs with grouped sidebar and hunk-based change viewer, re-run pipelines
 - **Real-time audio-text sync** — word-level timestamps via Azure Speech Services, with click-to-seek playback
@@ -63,7 +63,7 @@ flowchart TD
     subgraph K["Step 6 · Medical Summary"]
         direction TB
         K1["Step 6a · Summary Generation\n(GPT-5.2, temp=0.1)\nStructured Hebrew clinical summary"]
-        K2["Step 6b · Summary Validation\nDeterministic: duplicate meds,\ndosage plausibility\nLLM: hallucination detection,\nfaithfulness scoring"]
+        K2["Step 6b · Summary Validation\nDeterministic: duplicate meds,\ndosage plausibility\nLLM: hallucination detection,\nATC med verification, ICD condition verification,\nfaithfulness scoring"]
         K1 --> K2
     end
 
@@ -228,6 +228,8 @@ Two-layer quality control:
 | Check | Description |
 |-------|-------------|
 | **Hallucinated medications** | Identifies drugs in the summary that don't appear in the transcript |
+| **ATC medication verification** | Every medication name (generic or brand) is verified against the ATC (Anatomical Therapeutic Chemical) classification system. Unrecognized names are flagged with a suggested correction (e.g., "קרדילון" → Cardiloc/Bisoprolol) |
+| **ICD condition verification** | Every background disease/condition is verified against the ICD (International Classification of Diseases) system (ICD-9/10/11). Unrecognized conditions are flagged with a suggested correction (e.g., "אי ספיקת לב" → "אי ספיקת לבבית" / Heart Failure, ICD: I50) |
 | **Fabricated information** | Detects any data in the summary not grounded in the transcript |
 | **Chief complaint accuracy** | Verifies the chief complaint matches the actual reason for the visit |
 | **Faithfulness score** | 0–10 overall faithfulness rating |
@@ -534,7 +536,7 @@ typescript, vite
 |------|---------|-------|-------|
 | `src/medical_transcription/transcribe.py` | Main pipeline orchestrator | ~690 | `MedicalTranscriber` class, ThreadPoolExecutor for parallel Steps 1+2, STT background thread |
 | `src/medical_transcription/postprocess.py` | Post-processing stages A-E | ~400 | All 5 stages with trace integration |
-| `src/medical_transcription/medical_summary.py` | Medical summary + validation | ~450 | `MedicalSummaryGenerator`, medication equivalences, dosage ranges, dual-layer validation |
+| `src/medical_transcription/medical_summary.py` | Medical summary + validation | ~480 | `MedicalSummaryGenerator`, medication equivalences, dosage ranges, dual-layer validation, ATC medication verification, ICD condition verification |
 | `src/medical_transcription/trace.py` | Pipeline trace data layer | ~190 | `PipelineTrace`, `StepSnapshot`, 12 `STEP_DEFINITIONS` |
 | `src/medical_transcription/stt_timestamps.py` | Azure STT continuous recognition | ~150 | `transcribe_with_timestamps()`, MP3→WAV conversion, progress logging |
 | `src/medical_transcription/alignment.py` | Fuzzy word alignment | ~230 | `align_timestamps()`, SequenceMatcher, speaker label handling, gap interpolation |

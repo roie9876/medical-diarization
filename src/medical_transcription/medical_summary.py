@@ -307,10 +307,25 @@ VALIDATION_PROMPT = """אתה מערכת בקרת איכות לסיכום רפו
   "duplicate_medications": ["רשימת זוגות תרופות שהן בעצם אותה תרופה בשמות שונים"],
   "suspicious_dosages": ["תיאור מינונים חשודים"],
   "fabricated_info": ["מידע שמופיע בסיכום אבל לא בתמלול"],
+  "unrecognized_medications": ["רשימת תרופות שלא מזוהות במאגר ATC"],
+  "unrecognized_conditions": ["רשימת מחלות רקע שלא מזוהות במערכת ICD"],
   "chief_complaint_ok": true/false,
   "chief_complaint_note": "הערה אם התלונה העיקרית לא נכונה",
   "overall_faithfulness_score": 0-10
 }
+
+### בדיקת תרופות מול מאגר ATC (Anatomical Therapeutic Chemical Classification):
+עבור **כל** שם תרופה שמופיע בסיכום (שם גנרי או שם מסחרי), בדוק אם הוא קיים כתרופה מוכרת במערכת ה-ATC הבינלאומית.
+- אם שם התרופה **לא מזוהה** כשם גנרי (INN) או כשם מסחרי (brand name) של תרופה רשומה — הוסף אותו לרשימת `unrecognized_medications`.
+- ציין עבור כל תרופה לא מזוהה: את השם כפי שמופיע בסיכום, ואם יש לך ניחוש לגבי התרופה המקורית שהתכוונו אליה (למשל שגיאת כתיב) — ציין גם אותו.
+- דוגמה: אם בסיכום מופיע "קרדילון" — זו לא תרופה מוכרת. ייתכן שהכוונה ל-"Cardiloc" (קרדילוק). רשום: "קרדילון — לא נמצא ב-ATC. ייתכן: Cardiloc (Bisoprolol)".
+
+### בדיקת מחלות רקע מול מערכת ICD (International Classification of Diseases):
+עבור **כל** מחלת רקע שמופיעה בסיכום (בקטע "מחלות ברקע"), בדוק אם היא קיימת כאבחנה רפואית מוכרת במערכת ICD (כל הגרסאות: ICD-9, ICD-10, ICD-11).
+- אם שם המחלה **לא מזוהה** כאבחנה רפואית לגיטימית — הוסף אותו לרשימת `unrecognized_conditions`.
+- זה כולל מחלות שהן תיאורים לא רפואיים, מחלות שהומצאו, או שמות לא מדויקים שנוצרו כנראה משגיאת תמלול.
+- ציין עבור כל מחלה לא מזוהה: את השם כפי שמופיע בסיכום, ואם יש לך ניחוש למחלה המקורית שהתכוונו אליה — ציין גם אותו.
+- דוגמה: אם בסיכום מופיע "אי ספיקת לב" — זו לא אבחנה רפואית מוכרת. ייתכן שהכוונה ל-"Cardiac Insufficiency" / "אי ספיקת לבבית" (ICD: I50). רשום: "אי ספיקת לב — לא נמצא ב-ICD. ייתכן: אי ספיקת לבבית (Heart Failure, ICD: I50)".
 
 היה קפדני מאוד. כל פיסת מידע בסיכום חייבת להתבסס על התמלול.
 """
@@ -337,6 +352,8 @@ class MedicalSummaryReport:
     meds_in_summary: List[str] = field(default_factory=list)
     deterministic_duplicate_pairs: List[Tuple[str, str]] = field(default_factory=list)
     deterministic_dosage_warnings: List[str] = field(default_factory=list)
+    unrecognized_medications: List[str] = field(default_factory=list)
+    unrecognized_conditions: List[str] = field(default_factory=list)
     validation_passed: bool = True
 
     def to_dict(self) -> dict:
@@ -352,6 +369,8 @@ class MedicalSummaryReport:
             "meds_in_summary": self.meds_in_summary,
             "deterministic_duplicate_pairs": [list(p) for p in self.deterministic_duplicate_pairs],
             "deterministic_dosage_warnings": self.deterministic_dosage_warnings,
+            "unrecognized_medications": self.unrecognized_medications,
+            "unrecognized_conditions": self.unrecognized_conditions,
             "validation_passed": self.validation_passed,
         }
 
@@ -565,6 +584,12 @@ class MedicalSummaryGenerator:
         self.report.faithfulness_score = validation.get(
             "overall_faithfulness_score", 0
         )
+        self.report.unrecognized_medications = validation.get(
+            "unrecognized_medications", []
+        )
+        self.report.unrecognized_conditions = validation.get(
+            "unrecognized_conditions", []
+        )
 
     # ── Inject warnings into the summary ──────────────────────────────────
 
@@ -599,6 +624,18 @@ class MedicalSummaryGenerator:
             for info in self.report.fabricated_info:
                 warnings_section.append(
                     f"⚠️ מידע שייתכן שלא הוזכר בתמלול: {info}"
+                )
+
+        if self.report.unrecognized_medications:
+            for med in self.report.unrecognized_medications:
+                warnings_section.append(
+                    f"⚠️ תרופה לא מזוהה במאגר ATC: {med}"
+                )
+
+        if self.report.unrecognized_conditions:
+            for cond in self.report.unrecognized_conditions:
+                warnings_section.append(
+                    f"⚠️ מחלת רקע לא מזוהה במערכת ICD: {cond}"
                 )
 
         if not self.report.chief_complaint_ok:
@@ -639,6 +676,14 @@ def format_summary_report(report: MedicalSummaryReport) -> str:
             parts.append(f"      - {w}")
     if report.fabricated_info:
         parts.append(f"   ⚠️  Fabricated info: {', '.join(report.fabricated_info)}")
+    if report.unrecognized_medications:
+        parts.append(f"   ⚠️  Unrecognized meds (not in ATC): {len(report.unrecognized_medications)}")
+        for m in report.unrecognized_medications:
+            parts.append(f"      - {m}")
+    if report.unrecognized_conditions:
+        parts.append(f"   ⚠️  Unrecognized conditions (not in ICD): {len(report.unrecognized_conditions)}")
+        for c in report.unrecognized_conditions:
+            parts.append(f"      - {c}")
     if not report.chief_complaint_ok:
         parts.append(f"   ⚠️  Chief complaint issue: {report.chief_complaint_note}")
 
