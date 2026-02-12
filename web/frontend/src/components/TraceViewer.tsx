@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { TraceData } from "../types";
 import StepSidebar from "./StepSidebar";
 import StepContent from "./StepContent";
 import AudioPlayer from "./AudioPlayer";
+import SyncedTranscript from "./SyncedTranscript";
 
 interface Props {
   runId: string;
@@ -17,6 +18,8 @@ export default function TraceViewer({ runId, onBack, onRerun }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [rerunning, setRerunning] = useState(false);
+  const [showSync, setShowSync] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -80,7 +83,14 @@ export default function TraceViewer({ runId, onBack, onRerun }: Props) {
           ← Back
         </button>
         <h2>Run: {runId}</h2>
-        <AudioPlayer runId={runId} />
+        <AudioPlayer runId={runId} audioRef={audioRef} />
+        <button
+          className={`sync-toggle-btn ${showSync ? "active" : ""}`}
+          onClick={() => setShowSync((p) => !p)}
+          title="Toggle live word-sync view"
+        >
+          {showSync ? "📝 Steps" : "🔊 Live Sync"}
+        </button>
         <button
           className="rerun-btn"
           onClick={handleRerun}
@@ -94,14 +104,20 @@ export default function TraceViewer({ runId, onBack, onRerun }: Props) {
         </span>
       </div>
 
-      <div className="trace-body">
-        <StepSidebar
-          steps={trace.steps}
-          selectedIndex={selectedIndex}
-          onSelect={setSelectedIndex}
-        />
-        <StepContent currentStep={currentStep} previousStep={previousStep} />
-      </div>
+      {showSync ? (
+        <div className="trace-body synced-mode">
+          <SyncedTranscript runId={runId} audioRef={audioRef} />
+        </div>
+      ) : (
+        <div className="trace-body">
+          <StepSidebar
+            steps={trace.steps}
+            selectedIndex={selectedIndex}
+            onSelect={setSelectedIndex}
+          />
+          <StepContent currentStep={currentStep} previousStep={previousStep} />
+        </div>
+      )}
     </div>
   );
 }

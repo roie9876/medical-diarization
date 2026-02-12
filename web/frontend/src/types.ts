@@ -58,3 +58,12 @@ export interface AudioInfo {
   has_audio: boolean;
   filename: string | null;
 }
+
+export interface WordTimestamp {
+  word: string;
+  start_ms: number;
+  end_ms: number;
+  speaker: string | null;
+  is_interpolated: boolean;
+  line_index: number;
+}

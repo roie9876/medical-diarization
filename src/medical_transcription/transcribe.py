@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from evaluation import calculate_all_metrics, format_metrics_report
 from postprocess import PostProcessor, format_report as format_postprocess_report
 from trace import PipelineTrace
+from stt_timestamps import transcribe_with_timestamps
+from alignment import align_timestamps
 
 # Project root (three levels up from src/medical_transcription/transcribe.py)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -451,6 +453,18 @@ class MedicalTranscriber:
         # Initialize pipeline trace
         trace = PipelineTrace()
         
+        # Start Azure STT in parallel (for word-level timestamps)
+        # STT runs at real-time speed (~1x audio duration), so we don't wait for it.
+        # Instead, a background thread saves word_timestamps.json when STT finishes.
+        stt_future = None
+        stt_available = bool(os.getenv("AZURE_SPEECH_KEY")) and bool(os.getenv("AZURE_SPEECH_REGION"))
+        if stt_available:
+            print(f"\n🎤 Azure STT: starting word-level timestamp extraction (background)...")
+            stt_executor = ThreadPoolExecutor(max_workers=1)
+            stt_future = stt_executor.submit(transcribe_with_timestamps, audio_path)
+        else:
+            print(f"\n⚠️  Azure STT: skipping (AZURE_SPEECH_KEY/REGION not set)")
+        
         # Create temp directory for chunks
         with tempfile.TemporaryDirectory() as temp_dir:
             # Split audio if needed
@@ -515,11 +529,15 @@ class MedicalTranscriber:
         
         print(f"\n{format_postprocess_report(pp_report)}")
         
+        # Build result (don't wait for STT — it saves asynchronously)
+        word_timestamps = None
+        
         # Build result
         result = {
             "final_transcription": final_text,
             "postprocess_report": pp_report,
             "trace": trace,
+            "word_timestamps": word_timestamps,
             "metadata": {
                 "audio_path": audio_path,
                 "duration_minutes": duration_min,
@@ -558,6 +576,29 @@ class MedicalTranscriber:
             
             # Save pipeline trace
             trace.save(os.path.join(output_dir, "trace.json"))
+            
+            # Launch background STT → alignment → save (doesn't block pipeline)
+            if stt_future is not None:
+                ts_path = os.path.join(output_dir, "word_timestamps.json")
+                final_text_copy = final_text  # capture for closure
+
+                def _stt_background_save():
+                    try:
+                        stt_result = stt_future.result()  # no timeout — waits as long as needed
+                        stt_executor.shutdown(wait=False)
+                        print(f"\n🎤 STT completed: {len(stt_result['words'])} words, {stt_result['processing_time_seconds']:.1f}s")
+                        wts = align_timestamps(stt_result["words"], final_text_copy)
+                        matched = sum(1 for w in wts if not w["is_interpolated"])
+                        print(f"   ✅ Aligned: {matched}/{len(wts)} words ({100*matched/len(wts):.0f}% match)")
+                        with open(ts_path, "w", encoding="utf-8") as f:
+                            json.dump(wts, f, indent=2, ensure_ascii=False)
+                        print(f"   💾 Word timestamps saved: {ts_path}")
+                    except Exception as e:
+                        print(f"   ⚠️  STT background failed: {e}")
+
+                import threading
+                threading.Thread(target=_stt_background_save, daemon=True).start()
+                print(f"   🎤 STT running in background (will save word_timestamps.json when done)")
             
             # Save chunk details if chunked
             if total_chunks > 1:

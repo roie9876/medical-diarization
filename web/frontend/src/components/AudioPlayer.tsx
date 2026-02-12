@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 
 interface Props {
   runId: string;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
 }
 
-export default function AudioPlayer({ runId }: Props) {
+export default function AudioPlayer({ runId, audioRef }: Props) {
   const [hasAudio, setHasAudio] = useState<boolean | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     setHasAudio(null);

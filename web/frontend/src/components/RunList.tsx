@@ -11,6 +11,7 @@ export default function RunList({ onSelectRun, onRerun }: Props) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -28,6 +29,19 @@ export default function RunList({ onSelectRun, onRerun }: Props) {
     } catch (e) {
       alert(e instanceof Error ? e.message : "Re-run failed");
       setRerunningId(null);
+    }
+  };
+
+  const handleDelete = async (runId: string) => {
+    if (!confirm(`Delete run ${runId}? This cannot be undone.`)) return;
+    setDeletingId(runId);
+    try {
+      await api.deleteRun(runId);
+      setRuns((prev) => prev.filter((r) => r.run_id !== runId));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -76,6 +90,14 @@ export default function RunList({ onSelectRun, onRerun }: Props) {
                     {rerunningId === run.run_id ? "..." : "⟳"}
                   </button>
                 )}
+                <button
+                  className="delete-btn-small"
+                  onClick={() => handleDelete(run.run_id)}
+                  disabled={deletingId === run.run_id}
+                  title="Delete this run"
+                >
+                  {deletingId === run.run_id ? "..." : "✕"}
+                </button>
               </td>
             </tr>
           ))}

@@ -1,6 +1,6 @@
 // API client for the FastAPI backend
 
-import type { RunSummary, StepSummary, StepDetail, TraceData, JobStatus, AdminStatus, AudioInfo } from "./types";
+import type { RunSummary, StepSummary, StepDetail, TraceData, JobStatus, AdminStatus, AudioInfo, WordTimestamp } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
@@ -12,6 +12,12 @@ async function fetchJson<T>(path: string): Promise<T> {
 
 async function postJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { method: "POST" });
+  if (!res.ok) throw new Error(`API ${path}: ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function deleteJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`API ${path}: ${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -39,9 +45,15 @@ export const api = {
   // Re-run pipeline
   rerunPipeline: (runId: string) => postJson<{ job_id: string; message: string }>(`/api/rerun/${runId}`),
 
+  // Delete run
+  deleteRun: (runId: string) => deleteJson<{ status: string; run_id: string }>(`/api/runs/${runId}`),
+
   // Audio
   getAudioUrl: (runId: string) => `${API_BASE}/api/runs/${runId}/audio`,
   checkAudio: (runId: string) => fetchJson<AudioInfo>(`/api/runs/${runId}/has-audio`),
+
+  // Word timestamps
+  getWordTimestamps: (runId: string) => fetchJson<WordTimestamp[]>(`/api/runs/${runId}/word-timestamps`),
 
   // Admin
   adminStatus: () => fetchJson<AdminStatus>("/api/admin/status"),
