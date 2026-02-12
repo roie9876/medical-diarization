@@ -1,10 +1,37 @@
-# Environment variables and secrets
+# ============================================================
+# SENSITIVE DATA — medical recordings, transcriptions, PHI
+# ============================================================
+
+# ALL sample data (audio, ground truth, results) — contains PHI
+samples/*
+!samples/.gitkeep
+
+# Pipeline output directory
+output/*
+!output/.gitkeep
+
+# Variance / consistency test runs
+variance_test/
+
+# Audio files (in case they appear anywhere)
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.ogg
+*.wma
+
+# ============================================================
+# Secrets & environment
+# ============================================================
 .env
 .env.local
 .env.*.local
 *.env
 
+# ============================================================
 # Python
+# ============================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -32,14 +59,18 @@ ENV/
 env/
 .venv/
 
-# IDE
+# ============================================================
+# IDE / Editor
+# ============================================================
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
+# ============================================================
 # OS
+# ============================================================
 .DS_Store
 .DS_Store?
 ._*
@@ -48,27 +79,11 @@ env/
 ehthumbs.db
 Thumbs.db
 
-# Audio files - SENSITIVE medical data
-*.mp3
-*.wav
-*.m4a
-*.flac
-*.ogg
-*.wma
-
-# Transcription results and outputs - SENSITIVE
-samples/*/our_result/
-samples/*/our_result_previous/
-samples/*/other_system_result.txt
-
-# Variance test outputs
-variance_test/
-
-# Temporary files
+# ============================================================
+# Misc
+# ============================================================
 *.tmp
 *.temp
 temp/
 tmp/
-
-# Jupyter Notebooks
 .ipynb_checkpoints/

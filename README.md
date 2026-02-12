@@ -180,29 +180,61 @@ When a ground truth file is available, the system calculates:
 
 **Combined Score** = weighted sum of the above (0–1 scale).
 
-## Output Files
+## Project Structure
 
-| File | Content |
-|------|---------|
-| `final_transcription.txt` | The final cleaned transcription with speaker labels |
-| `metadata.json` | Audio path, duration, chunk count, processing time |
-| `postprocess_report.json` | Full audit trail of every post-processing change |
-| `metrics.json` | Evaluation scores (if ground truth provided) |
-| `chunks/chunk_NNN.txt` | Per-chunk merged transcription (multi-chunk only) |
+```
+├── .gitignore              # Blocks all sensitive/medical data from git
+├── .env.example            # Template for required environment variables
+├── requirements.txt        # Python dependencies
+├── README.md
+├── src/
+│   └── medical_transcription/
+│       ├── __init__.py
+│       ├── transcribe.py   # Main pipeline (Steps 0-5)
+│       ├── postprocess.py  # Post-processing stages A-E
+│       └── evaluation.py   # Metrics (WER, char accuracy, etc.)
+├── scripts/
+│   ├── compare_results.py      # Compare runs against ground truth
+│   ├── compare_sample1.py      # Compare sequential vs parallel results
+│   └── run_variance_test.py    # Multi-run consistency test
+├── samples/                # Audio + ground truth (gitignored — local only)
+│   └── .gitkeep
+├── output/                 # Pipeline output (gitignored)
+│   └── .gitkeep
+└── tests/
+    └── __init__.py
+```
+
+> **Privacy**: The `samples/` and `output/` directories are fully gitignored.
+> No audio files, transcriptions, ground truth, or any medical data is committed to the repository.
 
 ## Usage
 
 ```bash
-# Transcribe a sample
-python medical_transcription/transcribe.py sample1
+# 1. Clone & set up
+git clone https://github.com/roie9876/medical-diarization.git
+cd medical-diarization
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # then fill in your Azure OpenAI keys
 
-# Compare results against ground truth
-python compare_results.py
+# 2. Place audio files in samples/
+#    e.g. samples/sample1/audio.mp3
+
+# 3. Transcribe a sample
+python src/medical_transcription/transcribe.py sample1
+
+# 4. Run comparison scripts
+python scripts/compare_results.py
+python scripts/compare_sample1.py
+
+# 5. Run variance/consistency test
+python scripts/run_variance_test.py
 ```
 
 ## Requirements
 
 - Python 3.10+
 - Azure OpenAI access (GPT-Audio model + GPT-5.2)
-- `openai`, `pydub`, `python-dotenv`
-- `.env` file with `ENDPOINT_URL`, `AZURE_OPENAI_API_KEY`, `GPT52_ENDPOINT`, `GPT52_KEY`
+- FFmpeg (required by pydub for audio processing)
+- Dependencies listed in `requirements.txt`
