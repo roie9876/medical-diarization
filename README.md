@@ -22,10 +22,11 @@ Key capabilities:
 
 ```mermaid
 flowchart TD
-    A["🎙️ Audio Input\n(MP3, WAV, M4A)"] --> B{"Duration > 4 min?"}
+    A["🎙️ Audio Input<br/>(MP3 / WAV / M4A)"]
+    A --> B{"Duration<br/>> 4 min?"}
 
     B -- No --> D1["Single chunk"]
-    B -- Yes --> C["Step 0 · Audio Chunking\nSplit into 4-min chunks\nwith 30s overlap"]
+    B -- Yes --> C["Step 0 · Chunking<br/>4-min chunks, 30s overlap"]
     C --> D2["Chunk 1"]
     C --> D3["Chunk 2"]
     C --> D4["Chunk N"]
@@ -37,24 +38,24 @@ flowchart TD
 
     subgraph PAR["⚡ For Each Chunk (parallel)"]
         direction TB
-        E1["Step 1 · GPT-Audio\nPure Transcription\n(no speakers, temp=0)\nFocus: text accuracy"]
-        E2["Step 2 · GPT-Audio\nDiarized Transcription\n(with speaker labels, temp=0.2)\nFocus: who said what"]
-        E1 --> F["Step 3 · GPT-5.2 Merge\nCombine accurate text\n+ correct speaker IDs\nMap to רופא / מטופל / בן משפחה"]
+        E1["Step 1 · Pure Transcription<br/>GPT-Audio · temp=0<br/>Text accuracy, no speakers"]
+        E2["Step 2 · Diarized Transcription<br/>GPT-Audio · temp=0.2<br/>Speaker labels"]
+        E1 --> F["Step 3 · Smart Merge<br/>GPT-5.2 · Combine text + speakers<br/>→ רופא / מטופל / בן משפחה"]
         E2 --> F
     end
 
-    PAR --> G{"Multiple chunks?"}
-    G -- Yes --> H["Step 4 · Chunk Merging\nAlgorithmic overlap detection\n(sentence-level fuzzy matching)"]
+    PAR --> G{"Multiple<br/>chunks?"}
+    G -- Yes --> H["Step 4 · Chunk Merging<br/>Fuzzy sentence matching"]
     G -- No --> I
     H --> I
 
-    subgraph I["Step 5 · Post-Processing Pipeline"]
+    subgraph I["Step 5 · Post-Processing"]
         direction TB
-        SA["Stage A · Normalization\n(deterministic)"]
-        SB["Stage B · Dictionary Spelling\n(deterministic)"]
-        SC["Stage C · Deduplication\n(deterministic)"]
-        SD["Stage D · Semantic Fix\n(constrained LLM)"]
-        SE["Stage E · Validation\n(deterministic)"]
+        SA["5a · Normalization"]
+        SB["5b · Spelling Fixes"]
+        SC["5c · Deduplication"]
+        SD["5d · Semantic Fix (LLM)"]
+        SE["5e · Validation"]
         SA --> SB --> SC --> SD --> SE
     end
 
@@ -62,15 +63,15 @@ flowchart TD
 
     subgraph K["Step 6 · Medical Summary"]
         direction TB
-        K1["Step 6a · Summary Generation\n(GPT-5.2, temp=0.1)\nStructured Hebrew clinical summary"]
-        K2["Step 6b · Summary Validation\nDeterministic: duplicate meds,\ndosage plausibility\nLLM: hallucination detection,\nATC med verification, ICD condition verification,\nfaithfulness scoring"]
+        K1["6a · Summary Generation<br/>GPT-5.2<br/>Structured Hebrew summary"]
+        K2["6b · Validation<br/>✓ Duplicate meds<br/>✓ Dosage plausibility<br/>✓ ATC medication verification<br/>✓ ICD condition verification<br/>✓ Hallucination detection<br/>✓ Faithfulness score"]
         K1 --> K2
     end
 
-    K --> J["📄 Output\nfinal_transcription.txt\nmedical_summary.txt\nsummary_report.json\npostprocess_report.json"]
+    K --> J["📄 Output<br/>final_transcription.txt<br/>medical_summary.txt<br/>summary_report.json"]
 
-    A --> STT["🔊 Azure Fast Transcription\n(background, faster than real-time)\nWord-level timestamps"]
-    STT --> ALIGN["Alignment\nFuzzy-match STT ↔ GPT text\nword_timestamps.json"]
+    A --> STT["🔊 Azure STT (background)<br/>Word-level timestamps"]
+    STT --> ALIGN["Alignment<br/>Fuzzy-match STT ↔ GPT text"]
     ALIGN --> J
 ```
 
