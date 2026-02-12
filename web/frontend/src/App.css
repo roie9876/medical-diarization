@@ -499,7 +499,7 @@ button {
   display: flex;
   align-items: flex-start;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.6;
   min-height: 24px;
 }
@@ -681,14 +681,14 @@ button {
 .text-view {
   padding: 20px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .diff-wrapper {
-  font-size: 13px;
+  font-size: 16px;
 }
 
 /* Override react-diff-viewer for dark theme */

@@ -91,7 +91,7 @@ export default function TraceViewer({ runId, onBack, onRerun }: Props) {
           onClick={() => { setShowSync(false); setShowSummary(false); }}
           title="Pipeline steps view"
         >
-          📝 Steps
+          📝 Pipeline
         </button>
         <button
           className={`sync-toggle-btn ${showSync ? "active" : ""}`}
