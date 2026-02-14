@@ -57,6 +57,7 @@ class RunSummary(BaseModel):
     num_steps: int
     num_chunks: int
     has_audio: bool
+    audio_filename: Optional[str] = None
 
 
 class StepSummary(BaseModel):
@@ -129,12 +130,26 @@ def list_runs():
         try:
             data = load_trace(trace_path)
             audio_exists = _find_audio_for_run(run_id) is not None
+            # Extract original audio filename from metadata.json
+            audio_fname = None
+            meta_path = trace_path.parent / "metadata.json"
+            if meta_path.exists():
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as mf:
+                        meta = json.load(mf)
+                    raw = Path(meta.get("audio_path", "")).name  # e.g. 20260212_100303_מפגש2.wav
+                    # Strip the timestamp prefix (YYYYMMDD_HHMMSS_)
+                    parts = raw.split("_", 2)
+                    audio_fname = parts[2] if len(parts) >= 3 else raw
+                except Exception:
+                    pass
             runs.append(RunSummary(
                 run_id=run_id,
                 created_at=data.get("created_at", ""),
                 num_steps=data.get("total_steps", 0),
                 num_chunks=data.get("num_chunks", 0),
                 has_audio=audio_exists,
+                audio_filename=audio_fname,
             ))
         except Exception:
             continue

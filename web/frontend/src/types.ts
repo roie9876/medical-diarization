@@ -6,6 +6,7 @@ export interface RunSummary {
   num_steps: number;
   num_chunks: number;
   has_audio: boolean;
+  audio_filename?: string;
 }
 
 export interface StepSummary {

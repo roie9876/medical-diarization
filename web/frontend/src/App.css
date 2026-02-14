@@ -159,6 +159,7 @@ button {
 .run-list tr:hover td { background: var(--bg-hover); }
 
 .mono { font-family: var(--font-mono); font-size: 13px; }
+.run-audio-name { font-family: var(--font-sans, sans-serif); font-size: 13px; color: var(--text-secondary); font-weight: 400; }
 
 .view-btn {
   background: var(--accent);

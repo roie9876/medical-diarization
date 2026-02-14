@@ -72,7 +72,12 @@ export default function RunList({ onSelectRun, onRerun }: Props) {
         <tbody>
           {runs.map((run) => (
             <tr key={run.run_id}>
-              <td className="mono">{run.run_id}</td>
+              <td className="mono">
+                {run.run_id}
+                {run.audio_filename && (
+                  <span className="run-audio-name"> — {run.audio_filename}</span>
+                )}
+              </td>
               <td>{run.created_at.slice(0, 19).replace("T", " ")}</td>
               <td>{run.num_steps}</td>
               <td>{run.num_chunks}</td>
