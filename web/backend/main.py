@@ -32,9 +32,13 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "medical_transcription"))
 app = FastAPI(title="Medical Transcription Trace UI", version="1.0.0")
 
 # CORS for Vite dev server
+_frontend_port = os.environ.get("FRONTEND_PORT", "5173")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        f"http://localhost:{_frontend_port}",
+        f"http://127.0.0.1:{_frontend_port}",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -419,19 +423,6 @@ def check_run_audio(run_id: str):
     return {"has_audio": audio_path is not None, "filename": audio_path.name if audio_path else None}
 
 
-@app.get("/api/runs/{run_id}/word-timestamps")
-def get_word_timestamps(run_id: str):
-    """Get word-level timestamps for audio-text sync."""
-    for rid, trace_path in find_trace_files():
-        if rid == run_id:
-            ts_path = trace_path.parent / "word_timestamps.json"
-            if ts_path.exists():
-                with open(ts_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            raise HTTPException(404, f"No word timestamps for run '{run_id}'")
-    raise HTTPException(404, f"Run '{run_id}' not found")
-
-
 @app.get("/api/runs/{run_id}/medical-summary")
 def get_medical_summary(run_id: str):
     """Get the medical summary for a pipeline run."""
@@ -462,10 +453,6 @@ def delete_run(run_id: str):
             shutil.rmtree(run_dir)
             if audio_path and audio_path.exists() and UPLOAD_DIR in audio_path.parents:
                 audio_path.unlink(missing_ok=True)
-                # Remove .stt.wav if it was generated
-                stt_wav = audio_path.with_suffix(".stt.wav")
-                if stt_wav.exists():
-                    stt_wav.unlink(missing_ok=True)
             return {"status": "deleted", "run_id": run_id}
     raise HTTPException(404, f"Run '{run_id}' not found")
 

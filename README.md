@@ -1,6 +1,6 @@
 # Medical Diarization
 
-Hebrew medical conversation transcription with speaker diarization, powered by Azure OpenAI — with a full-stack web UI for visualization, pipeline tracing, and real-time audio-text sync.
+Hebrew medical conversation transcription with speaker diarization, powered by Azure OpenAI — with a full-stack web UI for visualization, pipeline tracing, and audio playback.
 
 ## What This Project Does
 
@@ -16,7 +16,6 @@ Key capabilities:
 - **Structured medical summary** — auto-generates a Hebrew clinical summary with built-in hallucination detection, medication duplicate detection, dosage plausibility checks, ATC medication verification, and ICD condition verification
 - **Pipeline tracing** — captures text state at every processing step for debugging and comparison
 - **Web UI** — upload audio, watch pipeline progress live, browse step-by-step diffs with grouped sidebar and hunk-based change viewer, re-run pipelines
-- **Real-time audio-text sync** — word-level timestamps via Azure Speech Services, with click-to-seek playback
 
 ## Pipeline Overview
 
@@ -69,15 +68,7 @@ flowchart TD
     end
 
     K --> J["📄 Output<br/>final_transcription.txt<br/>medical_summary.txt<br/>summary_report.json"]
-
-    A --> STT["🔊 Azure STT (background)<br/>Word-level timestamps"]
-    STT --> ALIGN["Alignment<br/>Fuzzy-match STT ↔ GPT text"]
-    ALIGN --> J
 ```
-
-### STT & Word-Level Timestamps (Background)
-
-In parallel with the main pipeline, the audio is also sent to the **Azure Fast Transcription API** for word-level timestamp extraction. This runs as a **background thread** and processes **faster than real-time** (a 20-minute file typically completes in 1–3 minutes). It does not block the pipeline. When complete, the timestamps are fuzzy-matched against the final GPT text using `SequenceMatcher` and saved as `word_timestamps.json`. The web UI auto-polls for this file and enables live audio-text sync when it appears.
 
 ## Pipeline Steps in Detail
 
@@ -91,21 +82,86 @@ In parallel with the main pipeline, the audio is also sent to the **Azure Fast T
 
 If the audio is ≤4 minutes it is processed as a single chunk. Otherwise it is split so that each pair of consecutive chunks shares 30 seconds of overlapping audio; this overlap is later used to stitch them back together without content loss.
 
+**Example — 12-minute recording:**
+
+```
+  Chunk 1: 0:00 ──────────── 4:00
+  Chunk 2:           3:30 ──────────── 7:30
+  Chunk 3:                      7:00 ──────────── 11:00
+  Chunk 4:                                10:30 ── 12:00
+                     ↑                     ↑
+               30s overlap           30s overlap
+```
+
+Each chunk is processed independently through Steps 1–3, then all chunks are stitched together in Step 4.
+
+---
+
 ### Step 1 — Pure Transcription (GPT-Audio)
 
 A call to the **GPT-Audio** model with `temperature=0` and a system prompt that says: *transcribe word-for-word, keep medical terms in English, do NOT add speaker labels*. The goal is maximum **text accuracy**.
+
+**Example output (Step 1):**
+```
+אז ראיתי את הצרים מהשרון, ספרת דוקטור רבין שתכיר גם, אז אלון הוא מטופל
+שלי שבעצם היה במלרד בתמונה של טרנזיאנט סטמי, ואז סונטאר עם PCI ל-LAD,
+שעבר בצורה מאוד טובה. בהתחלה היה לו הפרעת התכווצות עם EF עד 35 אחוז, אבל
+הוא השתכם מזה יפה מאוד, עם תפקוד לבדי שהוא כבר בגדר התקין, וסך הכל אנחנו
+עוקבים אחריו. שתי דברים שהפריעו לו, עדיין היה לו בביקור האחרון קצת כאבים
+בחזה, בעיקר העיפות. כן. ואנחנו עושים איזושהי אופטימיזציה של הטיפול התרופתי
+שלו, ומוודאים שהכל בסדר איתו.
+```
+
+> **Notice**: The text is accurate but has **no speaker labels** — it reads as a continuous paragraph. Medical terms like `PCI`, `LAD`, `EF` are kept in English.
+
+---
 
 ### Step 2 — Diarized Transcription (GPT-Audio)
 
 In **parallel** with Step 1, the same audio is sent to GPT-Audio again, this time instructed to identify all speakers (`[דובר 1]`, `[דובר 2]`, …). Uses `temperature=0.2`. The goal is accurate **speaker attribution**.
 
+**Example output (Step 2) — same audio:**
+```
+[דובר 1]: טוב, אז ראיתי את הצילומים מהשרון. נספר לד"ר רבין שתכיר גם.
+אז אלון הוא מטופל שלי שבעצם היה במלרד בתמונה של טרנזיאנט איסכמי, ואז
+צונתר עם PCI ל-LAD, שעבר בצורה מאוד טובה. בהתחלה היה לו הפרעת התכווצות
+עם EF של 35%, אבל הוא השתפר מזה יפה מאוד.
+
+[דובר 2 - אלון, המטופל]: לחצים.
+
+[דובר 1]: כן. ואנחנו עושים איזושהי אופטימיזציה של הטיפול התרופתי שלו.
+```
+
+> **Notice**: Speaker labels are present (`[דובר 1]`, `[דובר 2]`), but the text quality may differ from Step 1 — e.g. `"הצרים"` (Step 1) vs `"הצילומים"` (Step 2), `"סונטאר"` vs `"צונתר"`.
+
+---
+
 ### Step 3 — Smart Merge (GPT-5.2)
 
 GPT-5.2 receives both outputs and merges them:
-- Takes the **speaker structure** from Step 2
+- Takes the **speaker structure** from Step 2 (who said what)
 - Takes the **accurate text** from Step 1 where they differ
 - Maps generic speaker IDs to semantic roles: `[רופא]`, `[מטופל]`, `[בן משפחה]`
 - Normalizes medical terms to English
+
+**Example — after merge:**
+```
+[רופא]: אז ראיתי את הצירים מהשרון, ספרת דוקטור רבין שתכיר גם. אז אלון
+הוא מטופל שלי שבעצם היה במלר״ד בתמונה של טרנזיאנט סטמי, ואז צונתר עם PCI
+ל‑LAD, שעבר בצורה מאוד טובה. בהתחלה הייתה לו הפרעת התכווצות עם EF עד 35
+אחוז, אבל הוא השתכם מזה יפה מאוד, עם תפקוד לבבי שהוא כבר בגדר התקין.
+[מטופל]: לחצים.
+[רופא]: כן. ואנחנו עושים איזושהי אופטימיזציה של הטיפול התרופתי שלו,
+ומוודאים שהכול בסדר איתו.
+[בן משפחה]: יפה.
+```
+
+> **What happened**:
+> - `[דובר 1]` → `[רופא]`, `[דובר 2]` → `[מטופל]`, `[דובר 3]` → `[בן משפחה]`
+> - Text accuracy taken from Step 1 where it differs
+> - Speaker boundaries taken from Step 2
+
+---
 
 ### Step 4 — Chunk Merging (Algorithmic)
 
@@ -113,6 +169,34 @@ For multi-chunk audio, an algorithmic (no-LLM) step merges consecutive chunk res
 1. Attempts exact substring matching at chunk boundaries
 2. Falls back to sentence-level fuzzy matching (>70% character similarity)
 3. Removes the overlapping section from the second chunk and concatenates
+
+**Example — overlap detection between two chunks:**
+
+```
+── End of Chunk 1: ──
+[רופא]: אני מאוד אוהב את זה. יש איזושהי טענה כזאת ש‑LDL נמוך מדי הוא
+מסוכן, שאני לא מסכים איתה. אני חושב שכל אחד מאיתנו צריך לשאוף ל‑LDL
+כמה שיותר נמוך. ACR מעולה, מחסני ברזל טובים.
+[רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי.
+בוא נעבור כעת על התרופות.
+
+── Start of Chunk 2: ──
+[רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,   ← overlap detected
+שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין               ← overlap detected
+לוקח את כל מה שאני זוכר שאתה לוקח.
+[מטופל]: את כולם.
+[רופא]: ג׳ארדיאנס אתה לוקח, מטפורמין אתה לוקח.
+
+── After merge: ──
+[רופא]: אני מאוד אוהב את זה. יש איזושהי טענה כזאת ש‑LDL נמוך מדי הוא   ← kept from Chunk 1
+מסוכן, שאני לא מסכים איתה. אני חושב שכל אחד מאיתנו צריך לשאוף ל‑LDL
+כמה שיותר נמוך. ACR מעולה, מחסני ברזל טובים.
+[רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,   ← kept from Chunk 1
+שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין             ← continued from Chunk 2
+לוקח את כל מה שאני זוכר שאתה לוקח.
+[מטופל]: את כולם.                                                              ← new content from Chunk 2
+[רופא]: ג׳ארדיאנס אתה לוקח, מטפורמין אתה לוקח.
+```
 
 ---
 
@@ -133,6 +217,25 @@ The post-processing pipeline runs **five sequential stages** over the merged tra
 | Standardize medical terms | `PET CT` → `PET-CT`, case-fix `tee` → `TEE`, `dvt` → `DVT`, `igg4` → `IgG4` |
 | Remove blank lines | Empty lines are stripped |
 
+**Example — before and after Stage A:**
+```diff
+  BEFORE:
+- [רופאה] text about patient        ← wrong speaker tag
+- [רופא]  extra  spaces  here       ← double spaces
+- [מטופל] answer                     ← missing colon after tag
+-                                    ← blank line
+- [רופא]: we did a PET CT           ← should be PET-CT
+- [רופא]: the dvt was confirmed     ← should be uppercase DVT
+
+  AFTER:
++ [רופא]: text about patient        ✓ fixed tag
++ [רופא]: extra spaces here         ✓ collapsed whitespace
++ [מטופל]: answer                   ✓ added colon
++                                    ✓ blank line removed
++ [רופא]: we did a PET-CT           ✓ standardized
++ [רופא]: the DVT was confirmed     ✓ uppercased
+```
+
 ### Stage B — Dictionary Spelling Fixes
 
 **No LLM.** Applies a curated dictionary of ~30 known Hebrew transcription errors. Only **exact string matches** are replaced — no fuzzy logic. Examples:
@@ -152,12 +255,58 @@ The post-processing pipeline runs **five sequential stages** over the merged tra
 
 A set of **protected medical terms** (DVT, CT, PET-CT, TEE, MRI, ECG, IgG4, etc.) is never modified, even if a dictionary key appears as a substring inside them.
 
+**Example — before and after Stage B:**
+```diff
+  BEFORE:
+- [מטופל]: יש לי עזות בלילה ותחילות בבוקר
+- [רופא]: בואי נבדוק את בכום הלב
+- [מטופל]: הרופא רשם לי קרדיולוק ומולטאק
+
+  AFTER:
++ [מטופל]: יש לי הזעות בלילה ובחילות בבוקר    ← עזות→הזעות, תחילות→בחילות
++ [רופא]: בואי נבדוק את בקרום הלב               ← בכום הלב→בקרום הלב
++ [מטופל]: הרופא רשם לי קרדילול ו-Multaq        ← קרדיולוק→קרדילול, מולטאק→Multaq
+```
+
 ### Stage C — Deduplication
 
 **No LLM.** Removes content that was duplicated during chunk merging or transcription. Two passes:
 
 1. **Exact duplicate removal** — consecutive lines with identical fingerprints (after removing speaker tags, punctuation, normalizing Hebrew final letters ך→כ, ם→מ, etc.) are collapsed into one.
 2. **Near-duplicate block removal** — a sliding window of 1–4 lines is compared against the previous 20 lines using `SequenceMatcher`. Blocks with **>85% similarity** are removed.
+
+**Example — before and after Stage C:**
+```diff
+  BEFORE (duplicate block from chunk overlap):
+  [רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,
+  שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין לוקח את
+  כל מה שאני זוכר שאתה לוקח?
+  [מטופל]: את כולם.
+  [רופא]: ג׳ארדיאנס אתה לוקח? מטפורמין אתה לוקח?
+  [מטופל]: זה הגלוקומין.
+  [רופא]: גלוקומין, כן. רמיפריל 11.25? טריטייס?
+  [מטופל]: כן.
+  [רופא]: קרדילוק 11.25?
+
+- [רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,  ← 87% similar to line above
+- שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין לוקח את  ← REMOVED
+- כל מה שאני זוכר שאתה לוקח?                                                  ← REMOVED
+- [מטופל]: את כולם.                                                            ← REMOVED
+- [רופא]: ג׳ארדיאנס אתה לוקח? מטפורמין אתה לוקח?                             ← REMOVED
+- [מטופל]: זה הגלוקומין.                                                       ← REMOVED
+- [רופא]: גלוקומין, כן. רמיפריל 11.25? טריטייס?                               ← REMOVED
+
+  AFTER:
+  [רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,
+  שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין לוקח את
+  כל מה שאני זוכר שאתה לוקח?
+  [מטופל]: את כולם.
+  [רופא]: ג׳ארדיאנס אתה לוקח? מטפורמין אתה לוקח?        ✓ kept only one copy
+  [מטופל]: זה הגלוקומין.
+  [רופא]: גלוקומין, כן. רמיפריל 11.25? טריטייס?
+  [מטופל]: כן.
+  [רופא]: קרדילוק 11.25?
+```
 
 ### Stage D — Semantic Fix (Constrained LLM)
 
@@ -174,6 +323,26 @@ A set of **protected medical terms** (DVT, CT, PET-CT, TEE, MRI, ECG, IgG4, etc.
 
 A **safety check** rejects the LLM output if it is <90% of the original length — the original text is kept instead.
 
+**Example — before and after Stage D:**
+```diff
+  BEFORE:
+- [רופא]: שתי דברים שהפריעו לו                ← gender error (שתי→שני)
+- [מטופל]: הכל במגמת שיפור, יותר איתי         ← broken word (איתי→איטי)
+- [רופא]: עכשיו אתה כבר עשו כמיפוי            ← broken (עשו כמיפוי→עשית מיפוי)
+- [רופא]: המגמה היא איך שספיתי שהיא תהיה     ← broken (ספיתי→ציפיתי)
+
+  AFTER:
++ [רופא]: שני דברים שהפריעו לו                ✓ gender agreement fixed
++ [מטופל]: הכל במגמת שיפור, יותר איטי         ✓ broken word fixed
++ [רופא]: עכשיו אתה כבר עשית מיפוי            ✓ verb conjugation + broken word
++ [רופא]: המגמה היא איך שציפיתי שהיא תהיה    ✓ broken word reconstructed
+
+  NOT changed (preserved by constraint):
+  [רופא]: EF עד 35 אחוז                        ✓ number 35 preserved
+  [רופא]: LDL נפלא, 16                         ✓ number 16 and term LDL preserved
+  [רופא]: ספירונולקטון 12.5 מיליגרם             ✓ dosage 12.5 preserved
+```
+
 ### Stage E — Validation
 
 **No LLM.** A final audit that compares the text before and after processing:
@@ -185,7 +354,59 @@ A **safety check** rejects the LLM output if it is <90% of the original length �
 | **No hallucinated terms** | New medical terms that weren't in the original (and didn't come from the spelling dictionary) are flagged as possible hallucinations |
 | **Speaker tag sanity** | Counts `[רופא]`, `[מטופל]`, `[בן משפחה]` lines. Flags if >5 lines have no speaker tag, or if one speaker has >90% of all lines |
 
+**Example — validation output (`postprocess_report.json`):**
+```json
+{
+  "stage_a_changes": 81,
+  "stage_b_replacements": [],
+  "stage_c_duplicates_removed": 1,
+  "stage_c_duplicate_lines": [142],
+  "stage_d_corrections": [],
+  "stage_e_warnings": [],
+  "validation_passed": true,
+  "numbers_before_count": 31,
+  "numbers_after_count": 31,
+  "medical_terms_before": ["A1C", "ACR", "EF", "LAD", "LDL", "Lipitor", "PCI", "TSH", "Ultrasound"],
+  "medical_terms_after":  ["A1C", "ACR", "EF", "LAD", "LDL", "Lipitor", "PCI", "TSH", "Ultrasound"]
+}
+```
+
+> All 31 numbers preserved ✓ · All 9 medical terms preserved ✓ · 1 duplicate block removed · Validation passed ✓
+
 The result is a `PostProcessReport` containing every change, replacement, duplicate removed, and warning — saved as `postprocess_report.json`.
+
+---
+
+## Complete Pipeline Example — End to End
+
+Below is a condensed view of how a single sentence transforms through the entire pipeline:
+
+```
+🎙️ Audio: Doctor says "יש לו הזעות בלילה ובחילות, עשינו PET CT"
+
+Step 1 (Pure):       יש לו עזות בלילה ותחילות, עשינו PET CT
+                     ↑ phonetic error   ↑ phonetic error
+
+Step 2 (Diarized):   [דובר 1] יש לו עזות בלילה ותחילות, עשינו PET CT
+                     ↑ has speaker ID but same text errors
+
+Step 3 (Merge):      [רופא]: יש לו עזות בלילה ותחילות, עשינו PET CT
+                     ↑ speaker mapped to role
+
+Step 5a (Normalize): [רופא]: יש לו עזות בלילה ותחילות, עשינו PET-CT
+                                                              ↑ PET CT → PET-CT
+
+Step 5b (Spelling):  [רופא]: יש לו הזעות בלילה ובחילות, עשינו PET-CT
+                              ↑ עזות→הזעות   ↑ תחילות→בחילות
+
+Step 5c (Dedup):     (no change — no duplicates)
+
+Step 5d (Semantic):  (no change — sentence is grammatically correct)
+
+Step 5e (Validate):  ✓ PET-CT preserved, no numbers lost
+
+📄 Final:            [רופא]: יש לו הזעות בלילה ובחילות, עשינו PET-CT
+```
 
 ---
 
@@ -241,6 +462,38 @@ Two-layer quality control:
 - Saved as `medical_summary.txt` + `summary_report.json`
 - Validation passes if: no hallucinated meds, no fabricated info, chief complaint correct, faithfulness ≥ 7
 
+**Example — generated medical summary (from a real pipeline run):**
+
+```
+---רקע דמוגרפי---
+• גיל: לא צוין
+• מין: זכר
+
+---רקע רפואי---
+• מחלות ברקע:
+- אוטם לבבי עם STEMI טרנזיאנטי
+- מחלת לב כלילית לאחר צנתור ו‑PCI ל‑LAD
+- ירידה קודמת בתפקוד חדר שמאל (EF עד 35%) עם התאוששות לתפקוד תקין
+- הפרעה במשק הסוכר (A1C בעבר 12.2, כיום 5.9; impaired fasting glucose)
+
+• תרופות כרוניות:
+- Empagliflozin (Jardiance) – מינון לא צוין
+- Metformin (Glucophage / Glucomin) – מינון לא צוין
+- Ramipril (Tritace) 11.25 mg ⚠️ ייתכן שגיאת תמלול — מינון לא סטנדרטי
+- Bisoprolol (Cardiloc) 11.25 mg ⚠️ ייתכן שגיאת תמלול — מינון חריג
+- Zopiclone (Nocturno) 3.5 mg
+- Atorvastatin (Lipitor) – מינון לא צוין
+- Spironolactone (Aldactone) 12.5 mg
+- Aspirin (Aspirin Cardio) – מינון לא צוין
+- Prasugrel (Effient) – מינון לא צוין
+- Semaglutide (Ozempic) – מינון מוערך סביב 0.5 mg
+
+---תלונה עיקרית---
+• מעקב לאחר צנתור לבבי (PCI) עם תלונות על לחצים בחזה ועייפות
+```
+
+> **Notice**: The system automatically flagged `Ramipril 11.25 mg` and `Bisoprolol 11.25 mg` as possibly incorrect dosages (standard ranges don't include 11.25 mg — likely a transcription error of "1.25" or "11.25" spoken quickly).
+
 ---
 
 ## Evaluation
@@ -273,9 +526,7 @@ When a ground truth file is available, the system calculates:
 │       ├── postprocess.py      # Post-processing stages A-E
 │       ├── medical_summary.py  # Medical summary generation + validation (Step 6)
 │       ├── evaluation.py       # Metrics (WER, char accuracy, etc.)
-│       ├── trace.py            # Pipeline tracing (captures text at every step)
-│       ├── stt_timestamps.py   # Azure Speech Services STT (word-level timestamps)
-│       └── alignment.py        # Fuzzy word alignment (STT ↔ GPT final text)
+│       └── trace.py            # Pipeline tracing (captures text at every step)
 │
 ├── web/
 │   ├── backend/
@@ -291,12 +542,11 @@ When a ground truth file is available, the system calculates:
 │       │   └── components/
 │       │       ├── UploadView.tsx        # Drag-and-drop audio upload
 │       │       ├── RunList.tsx           # Pipeline runs list (with delete)
-│       │       ├── TraceViewer.tsx       # Step trace viewer + Live Sync toggle
+│       │       ├── TraceViewer.tsx       # Step trace viewer
 │       │       ├── StepSidebar.tsx       # Grouped & collapsible step navigation sidebar
 │       │       ├── StepContent.tsx       # Text/changes/diff-split/diff-unified views
 │       │       ├── MedicalSummaryView.tsx # Rich medical summary display
 │       │       ├── AudioPlayer.tsx       # Audio playback with shared ref
-│       │       ├── SyncedTranscript.tsx  # Word-level highlighting synced to audio
 │       │       ├── PipelineProgress.tsx  # Live step tracker during processing
 │       │       └── AdminPanel.tsx        # Restart backend/frontend buttons
 │       └── ...
@@ -304,9 +554,7 @@ When a ground truth file is available, the system calculates:
 ├── scripts/
 │   ├── compare_results.py      # Compare runs against ground truth
 │   ├── compare_sample1.py      # Compare sequential vs parallel results
-│   ├── run_variance_test.py    # Multi-run consistency test
-│   ├── test_timestamps.py      # GPT-Audio timestamp test (proved hallucinated)
-│   └── test_alignment.py       # STT alignment test script
+│   └── run_variance_test.py    # Multi-run consistency test
 │
 ├── samples/                    # Audio + ground truth (gitignored — local only)
 │   └── .gitkeep
@@ -343,7 +591,6 @@ The project includes a full-stack web interface for managing and inspecting pipe
 | **Medical Summary** | Rich formatted display of the medical summary with section icons, validation banner, and quality warnings |
 | **Re-run Pipeline** | One-click re-run from any completed run |
 | **Audio Player** | Built-in player for the original audio |
-| **Live Sync** | Toggle "🔊 Live Sync" to see word-level highlighting synced to audio playback |
 | **Admin Panel** | Restart backend/frontend processes |
 
 ### View Modes (Step Trace Viewer)
@@ -369,7 +616,6 @@ The project includes a full-stack web interface for managing and inspecting pipe
 | DELETE | `/api/runs/{run_id}` | Delete a run and its files |
 | GET | `/api/runs/{run_id}/audio` | Stream audio file |
 | GET | `/api/runs/{run_id}/has-audio` | Check if audio exists |
-| GET | `/api/runs/{run_id}/word-timestamps` | Get word-level timestamps |
 | GET | `/api/runs/{run_id}/medical-summary` | Get medical summary + validation report |
 | GET | `/api/health` | Health check |
 | POST | `/api/admin/restart-backend` | Restart backend |
@@ -386,21 +632,6 @@ The `trace.py` module captures a snapshot of the text at every pipeline step:
 - Each snapshot records: step index, step name, text content, timestamp, duration
 - Serialized as `trace.json` alongside each run's output
 - The web UI renders these as navigable step-by-step views with text diffs
-
----
-
-## Word-Level Audio Sync
-
-### How It Works
-
-1. **Azure Speech Services STT** (`stt_timestamps.py`): Continuous recognition extracts every word with millisecond-precision `start_ms` / `end_ms` timestamps. Converts MP3→WAV (16kHz mono) first.
-2. **Fuzzy Alignment** (`alignment.py`): Uses `SequenceMatcher` to match STT words against the final GPT-processed text. Handles speaker labels, interpolates gaps. Tested at ~73% direct match rate.
-3. **Background Processing**: STT runs as a daemon thread using the Azure Fast Transcription API (20-min audio ≈ 1–3 min), so it doesn't block the pipeline. When done, it automatically aligns and saves `word_timestamps.json`.
-4. **UI Auto-Polling**: The `SyncedTranscript` component polls every 5 seconds until timestamps are available, then enables word highlighting synchronized to audio playback with click-to-seek.
-
-### Key Design Decision: Why Azure STT Instead of GPT-Audio Timestamps?
-
-We tested GPT-Audio's built-in timestamps and proved they are **hallucinated** — a 60-second clip only produced timestamps up to 25.4 seconds. Azure Speech Services provides reliable, real timestamps.
 
 ---
 
@@ -447,7 +678,6 @@ python scripts/run_variance_test.py
 - **Azure OpenAI** access:
   - GPT-Audio model (transcription — Steps 1 & 2)
   - GPT-5.2 model (merge & semantic fix — Steps 3 & 5d)
-- **Azure Speech Services** (word-level STT timestamps)
 
 ### Environment Variables (`.env`)
 
@@ -461,10 +691,6 @@ AZURE_OPENAI_API_KEY=...
 GPT52_ENDPOINT_URL=https://...openai.azure.com/
 GPT52_DEPLOYMENT_NAME=gpt-5.2-chat
 GPT52_API_KEY=...
-
-# Azure Speech Services (for word-level timestamps)
-AZURE_SPEECH_KEY=...
-AZURE_SPEECH_REGION=swedencentral
 ```
 
 ### Python Dependencies
@@ -473,7 +699,6 @@ AZURE_SPEECH_REGION=swedencentral
 openai
 pydub
 python-dotenv
-requests
 fastapi
 uvicorn
 python-multipart
@@ -508,18 +733,18 @@ typescript, vite
        ┌───────────────┼───────────────┐
        │               │               │
        ▼               ▼               ▼
-┌─────────────┐ ┌────────────┐ ┌───────────────┐ ┌──────────────┐
-│ transcribe  │ │ postprocess│ │ medical_      │ │ stt_timestamps│
-│ .py         │ │ .py        │ │ summary.py    │ │ .py          │
-│ Steps 0-4   │ │ Step 5 A-E │ │ Step 6a-6b    │ │ (background) │
-│ GPT-Audio   │ │ GPT-5.2    │ │ GPT-5.2       │ │ Azure Speech │
-│ + GPT-5.2   │ │            │ │ + deterministic│ │ + alignment  │
-└─────────────┘ └────────────┘ └───────────────┘ └──────────────┘
-       │               │               │               │
-       └───────┬───────┴───────┬───────┘               │
-               ▼               ▼                       ▼
-          output/{run_id}/                    word_timestamps.json
-          ├── trace.json                      (saved async when ready)
+┌─────────────┐ ┌────────────┐ ┌───────────────┐
+│ transcribe  │ │ postprocess│ │ medical_      │
+│ .py         │ │ .py        │ │ summary.py    │
+│ Steps 0-4   │ │ Step 5 A-E │ │ Step 6a-6b    │
+│ GPT-Audio   │ │ GPT-5.2    │ │ GPT-5.2       │
+│ + GPT-5.2   │ │            │ │ + deterministic│
+└─────────────┘ └────────────┘ └───────────────┘
+       │               │               │
+       └───────┬───────┴───────┬───────┘
+               ▼               ▼
+          output/{run_id}/
+          ├── trace.json
           ├── final_transcription.txt
           ├── medical_summary.txt
           ├── summary_report.json
@@ -539,11 +764,8 @@ typescript, vite
 | `src/medical_transcription/postprocess.py` | Post-processing stages A-E | ~400 | All 5 stages with trace integration |
 | `src/medical_transcription/medical_summary.py` | Medical summary + validation | ~480 | `MedicalSummaryGenerator`, medication equivalences, dosage ranges, dual-layer validation, ATC medication verification, ICD condition verification |
 | `src/medical_transcription/trace.py` | Pipeline trace data layer | ~190 | `PipelineTrace`, `StepSnapshot`, 12 `STEP_DEFINITIONS` |
-| `src/medical_transcription/stt_timestamps.py` | Azure STT continuous recognition | ~150 | `transcribe_with_timestamps()`, MP3→WAV conversion, progress logging |
-| `src/medical_transcription/alignment.py` | Fuzzy word alignment | ~230 | `align_timestamps()`, SequenceMatcher, speaker label handling, gap interpolation |
-| `web/backend/main.py` | FastAPI backend | ~500 | All 16 endpoints, job queue, file serving |
-| `web/frontend/src/components/TraceViewer.tsx` | Step trace + Live Sync | ~200 | `audioRef` shared between AudioPlayer and SyncedTranscript |
-| `web/frontend/src/components/SyncedTranscript.tsx` | Word-level audio sync | ~180 | Auto-polls every 5s, binary search for active word, click-to-seek |
+| `web/backend/main.py` | FastAPI backend | ~500 | All endpoints, job queue, file serving |
+| `web/frontend/src/components/TraceViewer.tsx` | Step trace viewer | ~150 | `audioRef` shared with AudioPlayer |
 | `web/frontend/src/components/StepContent.tsx` | Step text + change views | ~350 | Line-level LCS diff, hunk grouping with context, word-level highlighting within changed line pairs, 4 view modes |
 | `web/frontend/src/components/StepSidebar.tsx` | Grouped step sidebar | ~170 | Collapsible groups (chunking/chunks/transcription/merging/postprocess/summary), count badges, active-dot indicator |
 | `web/frontend/src/components/MedicalSummaryView.tsx` | Medical summary display | ~200 | Section parsing, validation banner, rich formatting |

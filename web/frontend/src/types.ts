@@ -60,15 +60,6 @@ export interface AudioInfo {
   filename: string | null;
 }
 
-export interface WordTimestamp {
-  word: string;
-  start_ms: number;
-  end_ms: number;
-  speaker: string | null;
-  is_interpolated: boolean;
-  line_index: number;
-}
-
 export interface SummaryReport {
   hallucinated_medications: string[];
   duplicate_medications: string[][];

@@ -11,9 +11,40 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 CONTROL_DIR="/tmp/medical_diarization_ctl"
 mkdir -p "$CONTROL_DIR"
 
-CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'; NC='\033[0m'
 BACKEND_PID=0
 FRONTEND_PID=0
+
+# ── Port helpers ──────────────────────────────────────────────
+
+is_port_free() {
+  # Returns 0 (true) if the port is free, 1 (false) if in use
+  ! lsof -iTCP:"$1" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+find_free_port() {
+  local preferred=$1
+  local port=$preferred
+  local max_attempts=20
+  local attempt=0
+
+  while ! is_port_free "$port"; do
+    echo -e "${YELLOW}  Port $port is in use, trying next...${NC}" >&2
+    port=$((port + 1))
+    attempt=$((attempt + 1))
+    if [[ $attempt -ge $max_attempts ]]; then
+      echo -e "${RED}  Could not find a free port after $max_attempts attempts (started at $preferred)${NC}" >&2
+      exit 1
+    fi
+  done
+  echo "$port"
+}
+
+# Resolve available ports
+BACKEND_PORT=$(find_free_port 8000)
+FRONTEND_PORT=$(find_free_port 5173)
+
+export BACKEND_PORT FRONTEND_PORT
 
 cleanup() {
   echo -e "\n${CYAN}Shutting down...${NC}"
@@ -30,18 +61,18 @@ trap cleanup EXIT INT TERM
 # ── Start helpers ─────────────────────────────────────────────
 
 start_backend() {
-  echo -e "${CYAN}[backend]  Starting FastAPI on :8000${NC}"
+  echo -e "${CYAN}[backend]  Starting FastAPI on :${BACKEND_PORT}${NC}"
   cd "$ROOT/web/backend"
-  "$ROOT/.venv/bin/python" -m uvicorn main:app --reload --port 8000 &
+  FRONTEND_PORT="$FRONTEND_PORT" "$ROOT/.venv/bin/python" -m uvicorn main:app --reload --port "$BACKEND_PORT" &
   BACKEND_PID=$!
   echo $BACKEND_PID > "$CONTROL_DIR/backend.pid"
   cd "$ROOT"
 }
 
 start_frontend() {
-  echo -e "${CYAN}[frontend] Starting Vite on :5173${NC}"
+  echo -e "${CYAN}[frontend] Starting Vite on :${FRONTEND_PORT}${NC}"
   cd "$ROOT/web/frontend"
-  npx vite --host &
+  VITE_BACKEND_PORT="$BACKEND_PORT" VITE_PORT="$FRONTEND_PORT" npx vite --host --port "$FRONTEND_PORT" &
   FRONTEND_PID=$!
   echo $FRONTEND_PID > "$CONTROL_DIR/frontend.pid"
   cd "$ROOT"
@@ -69,8 +100,8 @@ start_backend
 start_frontend
 
 echo ""
-echo -e "${GREEN}Backend:   http://localhost:8000${NC}"
-echo -e "${GREEN}Frontend:  http://localhost:5173${NC}"
+echo -e "${GREEN}Backend:   http://localhost:${BACKEND_PORT}${NC}"
+echo -e "${GREEN}Frontend:  http://localhost:${FRONTEND_PORT}${NC}"
 echo -e "${GREEN}Control:   $CONTROL_DIR${NC}"
 echo ""
 

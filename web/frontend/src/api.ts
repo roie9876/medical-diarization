@@ -1,6 +1,6 @@
 // API client for the FastAPI backend
 
-import type { RunSummary, StepSummary, StepDetail, TraceData, JobStatus, AdminStatus, AudioInfo, WordTimestamp, MedicalSummaryData } from "./types";
+import type { RunSummary, StepSummary, StepDetail, TraceData, JobStatus, AdminStatus, AudioInfo, MedicalSummaryData } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
@@ -51,9 +51,6 @@ export const api = {
   // Audio
   getAudioUrl: (runId: string) => `${API_BASE}/api/runs/${runId}/audio`,
   checkAudio: (runId: string) => fetchJson<AudioInfo>(`/api/runs/${runId}/has-audio`),
-
-  // Word timestamps
-  getWordTimestamps: (runId: string) => fetchJson<WordTimestamp[]>(`/api/runs/${runId}/word-timestamps`),
 
   // Medical summary
   getMedicalSummary: (runId: string) => fetchJson<MedicalSummaryData>(`/api/runs/${runId}/medical-summary`),
