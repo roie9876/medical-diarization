@@ -102,17 +102,21 @@ Each chunk is processed independently through Steps 1–3, then all chunks are s
 A call to the **GPT-Audio** model with `temperature=0` and a system prompt that says: *transcribe word-for-word, keep medical terms in English, do NOT add speaker labels*. The goal is maximum **text accuracy**.
 
 **Example output (Step 1):**
+
+<div dir="rtl">
+
 ```
-אז ראיתי את הצרים מהשרון, ספרת דוקטור רבין שתכיר גם, אז אלון הוא מטופל
-שלי שבעצם היה במלרד בתמונה של טרנזיאנט סטמי, ואז סונטאר עם PCI ל-LAD,
-שעבר בצורה מאוד טובה. בהתחלה היה לו הפרעת התכווצות עם EF עד 35 אחוז, אבל
-הוא השתכם מזה יפה מאוד, עם תפקוד לבדי שהוא כבר בגדר התקין, וסך הכל אנחנו
-עוקבים אחריו. שתי דברים שהפריעו לו, עדיין היה לו בביקור האחרון קצת כאבים
-בחזה, בעיקר העיפות. כן. ואנחנו עושים איזושהי אופטימיזציה של הטיפול התרופתי
-שלו, ומוודאים שהכל בסדר איתו.
+אז בוא נראה את תוצאות הבדיקות שלך. ה-CT חזה יצא נקי, אין ממצאים
+חדשים. רמות הסוכר, A1C 7.1 אחוז, עדיין קצת מעל היעד. הכלסטרול
+LDL 95, צריך להוריד אותו מתחת ל-70. לחץ דם 135 על 85, לא רע
+אבל אפשר להשתפר. אני חושב שנעלה את האמלודיפים מ-5 ל-10 מיליגרם.
+ומה לגבי התרופות האחרות, אתה לוקח את הכל? כן, אני לוקח. יופי,
+מטפורמן ואטורבסטטין, את שניהם? כן. מצוין, נתראה בעוד שלושה חודשים.
 ```
 
-> **Notice**: The text is accurate but has **no speaker labels** — it reads as a continuous paragraph. Medical terms like `PCI`, `LAD`, `EF` are kept in English.
+</div>
+
+> **Notice**: The text is accurate but has **no speaker labels** — it reads as a continuous paragraph. Medical terms like `CT`, `LDL`, `A1C` are kept in English.
 
 ---
 
@@ -121,18 +125,25 @@ A call to the **GPT-Audio** model with `temperature=0` and a system prompt that 
 In **parallel** with Step 1, the same audio is sent to GPT-Audio again, this time instructed to identify all speakers (`[דובר 1]`, `[דובר 2]`, …). Uses `temperature=0.2`. The goal is accurate **speaker attribution**.
 
 **Example output (Step 2) — same audio:**
+
+<div dir="rtl">
+
 ```
-[דובר 1]: טוב, אז ראיתי את הצילומים מהשרון. נספר לד"ר רבין שתכיר גם.
-אז אלון הוא מטופל שלי שבעצם היה במלרד בתמונה של טרנזיאנט איסכמי, ואז
-צונתר עם PCI ל-LAD, שעבר בצורה מאוד טובה. בהתחלה היה לו הפרעת התכווצות
-עם EF של 35%, אבל הוא השתפר מזה יפה מאוד.
+[דובר 1]: אז בוא נראה את תוצאות הבדיקות שלך. ה-CT חזה יצא נקי,
+אין ממצאים חדשים. רמות הסוכר, A1C 7.1 אחוז, עדיין קצת מעל היעד.
+הכולסטרול LDL 95, צריך להוריד אותו מתחת ל-70.
 
-[דובר 2 - אלון, המטופל]: לחצים.
+[דובר 2]: כן, אני יודע שצריך להוריד.
 
-[דובר 1]: כן. ואנחנו עושים איזושהי אופטימיזציה של הטיפול התרופתי שלו.
+[דובר 1]: לחץ דם 135 על 85. אני חושב שנעלה את ה-Amlodipine
+מ-5 ל-10 מיליגרם. ומה לגבי התרופות, אתה לוקח את הכל?
+
+[דובר 2]: כן, את הכל.
 ```
 
-> **Notice**: Speaker labels are present (`[דובר 1]`, `[דובר 2]`), but the text quality may differ from Step 1 — e.g. `"הצרים"` (Step 1) vs `"הצילומים"` (Step 2), `"סונטאר"` vs `"צונתר"`.
+</div>
+
+> **Notice**: Speaker labels are present (`[דובר 1]`, `[דובר 2]`), but the text quality may differ from Step 1 — e.g. `"הכלסטרול"` (Step 1) vs `"הכולסטרול"` (Step 2), `"האמלודיפים"` vs `"ה-Amlodipine"`.
 
 ---
 
@@ -145,16 +156,21 @@ GPT-5.2 receives both outputs and merges them:
 - Normalizes medical terms to English
 
 **Example — after merge:**
+
+<div dir="rtl">
+
 ```
-[רופא]: אז ראיתי את הצירים מהשרון, ספרת דוקטור רבין שתכיר גם. אז אלון
-הוא מטופל שלי שבעצם היה במלר״ד בתמונה של טרנזיאנט סטמי, ואז צונתר עם PCI
-ל‑LAD, שעבר בצורה מאוד טובה. בהתחלה הייתה לו הפרעת התכווצות עם EF עד 35
-אחוז, אבל הוא השתכם מזה יפה מאוד, עם תפקוד לבבי שהוא כבר בגדר התקין.
-[מטופל]: לחצים.
-[רופא]: כן. ואנחנו עושים איזושהי אופטימיזציה של הטיפול התרופתי שלו,
-ומוודאים שהכול בסדר איתו.
-[בן משפחה]: יפה.
+[רופא]: אז בוא נראה את תוצאות הבדיקות שלך. ה-CT חזה יצא נקי,
+אין ממצאים חדשים. רמות הסוכר, A1C 7.1 אחוז, עדיין קצת מעל היעד.
+הכלסטרול LDL 95, צריך להוריד אותו מתחת ל-70.
+[מטופל]: כן, אני יודע שצריך להוריד.
+[רופא]: לחץ דם 135 על 85. אני חושב שנעלה את האמלודיפים מ-5
+ל-10 מיליגרם. ומה לגבי התרופות, מטפורמן ואטורבסטטין, לוקח הכל?
+[מטופל]: כן, את הכל.
+[רופא]: מצוין, נתראה בעוד שלושה חודשים.
 ```
+
+</div>
 
 > **What happened**:
 > - `[דובר 1]` → `[רופא]`, `[דובר 2]` → `[מטופל]`, `[דובר 3]` → `[בן משפחה]`
@@ -174,28 +190,26 @@ For multi-chunk audio, an algorithmic (no-LLM) step merges consecutive chunk res
 
 ```
 ── End of Chunk 1: ──
-[רופא]: אני מאוד אוהב את זה. יש איזושהי טענה כזאת ש‑LDL נמוך מדי הוא
-מסוכן, שאני לא מסכים איתה. אני חושב שכל אחד מאיתנו צריך לשאוף ל‑LDL
-כמה שיותר נמוך. ACR מעולה, מחסני ברזל טובים.
-[רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי.
-בוא נעבור כעת על התרופות.
+[רופא]: אז לגבי הבדיקות, אני רוצה שתעשה גם ECG ובדיקת מאמץ.
+ה-LDL צריך לרדת מתחת ל-70, אז נעלה את ה-Atorvastatin
+מ-20 ל-40 מיליגרם.
+[רופא]: לגבי לחץ הדם, 135 על 85, נעלה את ה-Amlodipine ל-10.
+בוא נבדוק שוב בעוד חודש.
 
 ── Start of Chunk 2: ──
-[רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,   ← overlap detected
-שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין               ← overlap detected
-לוקח את כל מה שאני זוכר שאתה לוקח.
-[מטופל]: את כולם.
-[רופא]: ג׳ארדיאנס אתה לוקח, מטפורמין אתה לוקח.
+[רופא]: לגבי לחץ הדם, 135 על 85, נעלה את ה-Amlodipine ל-10.        ← overlap detected
+בוא נבדוק שוב בעוד חודש.                                             ← overlap detected
+[מטופל]: בסדר, ואיך לגבי ה-Metformin?
+[רופא]: Metformin אתה ממשיך עם 850 פעמיים ביום.
 
 ── After merge: ──
-[רופא]: אני מאוד אוהב את זה. יש איזושהי טענה כזאת ש‑LDL נמוך מדי הוא   ← kept from Chunk 1
-מסוכן, שאני לא מסכים איתה. אני חושב שכל אחד מאיתנו צריך לשאוף ל‑LDL
-כמה שיותר נמוך. ACR מעולה, מחסני ברזל טובים.
-[רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,   ← kept from Chunk 1
-שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין             ← continued from Chunk 2
-לוקח את כל מה שאני זוכר שאתה לוקח.
-[מטופל]: את כולם.                                                              ← new content from Chunk 2
-[רופא]: ג׳ארדיאנס אתה לוקח, מטפורמין אתה לוקח.
+[רופא]: אז לגבי הבדיקות, אני רוצה שתעשה גם ECG ובדיקת מאמץ.     ← kept from Chunk 1
+ה-LDL צריך לרדת מתחת ל-70, אז נעלה את ה-Atorvastatin
+מ-20 ל-40 מיליגרם.
+[רופא]: לגבי לחץ הדם, 135 על 85, נעלה את ה-Amlodipine ל-10.        ← kept from Chunk 1
+בוא נבדוק שוב בעוד חודש.
+[מטופל]: בסדר, ואיך לגבי ה-Metformin?                                ← new content from Chunk 2
+[רופא]: Metformin אתה ממשיך עם 850 פעמיים ביום.
 ```
 
 ---
@@ -278,34 +292,30 @@ A set of **protected medical terms** (DVT, CT, PET-CT, TEE, MRI, ECG, IgG4, etc.
 **Example — before and after Stage C:**
 ```diff
   BEFORE (duplicate block from chunk overlap):
-  [רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,
-  שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין לוקח את
-  כל מה שאני זוכר שאתה לוקח?
-  [מטופל]: את כולם.
-  [רופא]: ג׳ארדיאנס אתה לוקח? מטפורמין אתה לוקח?
-  [מטופל]: זה הגלוקומין.
-  [רופא]: גלוקומין, כן. רמיפריל 11.25? טריטייס?
-  [מטופל]: כן.
-  [רופא]: קרדילוק 11.25?
+  [רופא]: לגבי לחץ הדם, 135 על 85, נעלה את ה-Amlodipine ל-10
+  מיליגרם. בוא נבדוק שוב בעוד חודש.
+  [מטופל]: בסדר.
+  [רופא]: Metformin אתה ממשיך עם 850 פעמיים ביום.
+  [מטופל]: כן, את הכל.
+  [רופא]: ויש לנו גם Atorvastatin 40 מיליגרם.
+  [מטופל]: בסדר.
+  [רופא]: אז ECG ומבחן מאמץ.
 
-- [רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,  ← 87% similar to line above
-- שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין לוקח את  ← REMOVED
-- כל מה שאני זוכר שאתה לוקח?                                                  ← REMOVED
-- [מטופל]: את כולם.                                                            ← REMOVED
-- [רופא]: ג׳ארדיאנס אתה לוקח? מטפורמין אתה לוקח?                             ← REMOVED
-- [מטופל]: זה הגלוקומין.                                                       ← REMOVED
-- [רופא]: גלוקומין, כן. רמיפריל 11.25? טריטייס?                               ← REMOVED
+- [רופא]: לגבי לחץ הדם, 135 על 85, נעלה את ה-Amlodipine ל-10     ← 89% similar to block above
+- מיליגרם. בוא נבדוק שוב בעוד חודש.                                ← REMOVED
+- [מטופל]: בסדר.                                                    ← REMOVED
+- [רופא]: Metformin אתה ממשיך עם 850 פעמיים ביום.                  ← REMOVED
+- [מטופל]: כן, את הכל.                                              ← REMOVED
 
   AFTER:
-  [רופא]: גם מתחת ל‑5.4, אבל זה לא סוכרת, זה משהו שנקרא מצב טרום‑סוכרתי,
-  שהוא בסדר, מטפלים בו. בוא נעבור כעת על התרופות, נראה שאתה עדיין לוקח את
-  כל מה שאני זוכר שאתה לוקח?
-  [מטופל]: את כולם.
-  [רופא]: ג׳ארדיאנס אתה לוקח? מטפורמין אתה לוקח?        ✓ kept only one copy
-  [מטופל]: זה הגלוקומין.
-  [רופא]: גלוקומין, כן. רמיפריל 11.25? טריטייס?
-  [מטופל]: כן.
-  [רופא]: קרדילוק 11.25?
+  [רופא]: לגבי לחץ הדם, 135 על 85, נעלה את ה-Amlodipine ל-10
+  מיליגרם. בוא נבדוק שוב בעוד חודש.
+  [מטופל]: בסדר.                                            ✓ kept only one copy
+  [רופא]: Metformin אתה ממשיך עם 850 פעמיים ביום.
+  [מטופל]: כן, את הכל.
+  [רופא]: ויש לנו גם Atorvastatin 40 מיליגרם.
+  [מטופל]: בסדר.
+  [רופא]: אז ECG ומבחן מאמץ.
 ```
 
 ### Stage D — Semantic Fix (Constrained LLM)
@@ -326,21 +336,21 @@ A **safety check** rejects the LLM output if it is <90% of the original length �
 **Example — before and after Stage D:**
 ```diff
   BEFORE:
-- [רופא]: שתי דברים שהפריעו לו                ← gender error (שתי→שני)
-- [מטופל]: הכל במגמת שיפור, יותר איתי         ← broken word (איתי→איטי)
-- [רופא]: עכשיו אתה כבר עשו כמיפוי            ← broken (עשו כמיפוי→עשית מיפוי)
-- [רופא]: המגמה היא איך שספיתי שהיא תהיה     ← broken (ספיתי→ציפיתי)
+- [רופא]: שתי בדיקות שצריך לעשות                 ← gender error (שתי→שני)
+- [מטופל]: הכל במגמת שיפור, יותר איתי             ← broken word (איתי→איטי)
+- [רופא]: עכשיו אתה כבר עשו בדיקת מאמץ           ← broken verb (עשו→עשית)
+- [רופא]: התוצאות כמו שספיתי שהן יהיו             ← broken word (ספיתי→ציפיתי)
 
   AFTER:
-+ [רופא]: שני דברים שהפריעו לו                ✓ gender agreement fixed
-+ [מטופל]: הכל במגמת שיפור, יותר איטי         ✓ broken word fixed
-+ [רופא]: עכשיו אתה כבר עשית מיפוי            ✓ verb conjugation + broken word
-+ [רופא]: המגמה היא איך שציפיתי שהיא תהיה    ✓ broken word reconstructed
++ [רופא]: שני בדיקות שצריך לעשות                  ✓ gender agreement fixed
++ [מטופל]: הכל במגמת שיפור, יותר איטי              ✓ broken word fixed
++ [רופא]: עכשיו אתה כבר עשית בדיקת מאמץ           ✓ verb conjugation fixed
++ [רופא]: התוצאות כמו שציפיתי שהן יהיו             ✓ broken word reconstructed
 
   NOT changed (preserved by constraint):
-  [רופא]: EF עד 35 אחוז                        ✓ number 35 preserved
-  [רופא]: LDL נפלא, 16                         ✓ number 16 and term LDL preserved
-  [רופא]: ספירונולקטון 12.5 מיליגרם             ✓ dosage 12.5 preserved
+  [רופא]: A1C של 7.1 אחוז                          ✓ number 7.1 preserved
+  [רופא]: LDL הוא 95                                 ✓ number 95 and term LDL preserved
+  [רופא]: Amlodipine 10 מיליגרם                      ✓ dosage 10 preserved
 ```
 
 ### Stage E — Validation
@@ -357,21 +367,21 @@ A **safety check** rejects the LLM output if it is <90% of the original length �
 **Example — validation output (`postprocess_report.json`):**
 ```json
 {
-  "stage_a_changes": 81,
+  "stage_a_changes": 54,
   "stage_b_replacements": [],
   "stage_c_duplicates_removed": 1,
-  "stage_c_duplicate_lines": [142],
+  "stage_c_duplicate_lines": [86],
   "stage_d_corrections": [],
   "stage_e_warnings": [],
   "validation_passed": true,
-  "numbers_before_count": 31,
-  "numbers_after_count": 31,
-  "medical_terms_before": ["A1C", "ACR", "EF", "LAD", "LDL", "Lipitor", "PCI", "TSH", "Ultrasound"],
-  "medical_terms_after":  ["A1C", "ACR", "EF", "LAD", "LDL", "Lipitor", "PCI", "TSH", "Ultrasound"]
+  "numbers_before_count": 18,
+  "numbers_after_count": 18,
+  "medical_terms_before": ["A1C", "Amlodipine", "Atorvastatin", "CT", "ECG", "LDL", "Metformin"],
+  "medical_terms_after":  ["A1C", "Amlodipine", "Atorvastatin", "CT", "ECG", "LDL", "Metformin"]
 }
 ```
 
-> All 31 numbers preserved ✓ · All 9 medical terms preserved ✓ · 1 duplicate block removed · Validation passed ✓
+> All 18 numbers preserved ✓ · All 7 medical terms preserved ✓ · 1 duplicate block removed · Validation passed ✓
 
 The result is a `PostProcessReport` containing every change, replacement, duplicate removed, and warning — saved as `postprocess_report.json`.
 
@@ -462,37 +472,47 @@ Two-layer quality control:
 - Saved as `medical_summary.txt` + `summary_report.json`
 - Validation passes if: no hallucinated meds, no fabricated info, chief complaint correct, faithfulness ≥ 7
 
-**Example — generated medical summary (from a real pipeline run):**
+**Example — generated medical summary:**
+
+<div dir="rtl">
 
 ```
 ---רקע דמוגרפי---
-• גיל: לא צוין
+• גיל: 58
 • מין: זכר
 
 ---רקע רפואי---
 • מחלות ברקע:
-- אוטם לבבי עם STEMI טרנזיאנטי
-- מחלת לב כלילית לאחר צנתור ו‑PCI ל‑LAD
-- ירידה קודמת בתפקוד חדר שמאל (EF עד 35%) עם התאוששות לתפקוד תקין
-- הפרעה במשק הסוכר (A1C בעבר 12.2, כיום 5.9; impaired fasting glucose)
+- יתר לחץ דם
+- סוכרת סוג 2
+- דיסליפידמיה
 
 • תרופות כרוניות:
-- Empagliflozin (Jardiance) – מינון לא צוין
-- Metformin (Glucophage / Glucomin) – מינון לא צוין
-- Ramipril (Tritace) 11.25 mg ⚠️ ייתכן שגיאת תמלול — מינון לא סטנדרטי
-- Bisoprolol (Cardiloc) 11.25 mg ⚠️ ייתכן שגיאת תמלול — מינון חריג
-- Zopiclone (Nocturno) 3.5 mg
-- Atorvastatin (Lipitor) – מינון לא צוין
-- Spironolactone (Aldactone) 12.5 mg
-- Aspirin (Aspirin Cardio) – מינון לא צוין
-- Prasugrel (Effient) – מינון לא צוין
-- Semaglutide (Ozempic) – מינון מוערך סביב 0.5 mg
+- Amlodipine 15 mg ⚠️ ייתכן שגיאת תמלול — מינון חריג (מקסימום מקובל: 10 מ"ג)
+- Metformin 850 mg × 2 ביום
+- Atorvastatin 40 mg
+- Aspirin 100 mg
+- Ramipril 5 mg
 
 ---תלונה עיקרית---
-• מעקב לאחר צנתור לבבי (PCI) עם תלונות על לחצים בחזה ועייפות
+• מעקב שגרתי — סוכרת לא מאוזנת (A1C 7.1%) ודיסליפידמיה (LDL 95)
+
+---תוצאות מעבדה---
+• A1C: 7.1%
+• LDL: 95 mg/dL
+• TSH: 2.3 (תקין)
+• לחץ דם: 135/85
+
+---המלצות---
+• העלאת Amlodipine מ-5 ל-10 מיליגרם
+• העלאת Atorvastatin מ-20 ל-40 מיליגרם
+• בדיקות ECG ומבחן מאמץ
+• מעקב חוזר בעוד 3 חודשים
 ```
 
-> **Notice**: The system automatically flagged `Ramipril 11.25 mg` and `Bisoprolol 11.25 mg` as possibly incorrect dosages (standard ranges don't include 11.25 mg — likely a transcription error of "1.25" or "11.25" spoken quickly).
+</div>
+
+> **Notice**: The system automatically flagged `Amlodipine 15 mg` as a possibly incorrect dosage (standard maximum is 10 mg — likely a transcription error of "5" heard as "15").
 
 ---
 
