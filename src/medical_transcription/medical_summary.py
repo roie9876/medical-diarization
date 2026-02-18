@@ -193,6 +193,19 @@ SYSTEM_PROMPT = """אתה מערכת לסיכום רפואי מדויק. תפק�
 - אל תסיק, אל תניח, אל תוסיף פרטים שלא הוזכרו בתמלול.
 - זה חל גם על מחלות רקע, תרופות, תוצאות בדיקות — הכל חייב להיות מבוסס על התמלול בלבד.
 
+### 1א. הבחנה קריטית: מידע **על** המטופל לעומת מידע **הסברתי/תיאורטי**
+- הבחן בין **עובדות על המטופל** לבין **מידע שהרופא מזכיר בהקשר הסברתי, חינוכי או תיאורטי**.
+- **דוגמה**: אם הרופא אומר "יש מחקרים חדשים אחרי אבלציה של פירפור" — זה **לא** אומר שהמטופל עבר אבלציה. זה מידע הסברתי בלבד.
+- **דוגמה**: אם הרופא אומר "הביקור הקודם דיברנו על..." — זה מידע עובדתי על המטופל.
+- **כלל אצבע**: אם הרופא מדבר על נושא בגוף שלישי, בהקשר כללי, או כדי להסביר רעיון — זה **לא** פרט על המטופל.
+- אל תרשום פרוצדורות, אבחנות או מצבים שהוזכרו רק כ"דוגמה" או "אפשרות תיאורטית" כאילו המטופל עבר אותם.
+
+### 1ב. סיכום רפואי של הרופא — נאמנות מוחלטת
+- בסעיף "סיכום רפואי של הרופא" — אם הרופא נותן סיכום מילולי בעצמו (למשל: "אז אני מסכם...", "לסיכום..."), **השתמש בתוכן שהרופא אמר** כבסיס לסעיף.
+- **אל תמציא מסקנות** שהרופא לא אמר. אל תוסיף מילים כמו "מחלוקת", "דיון נרחב", או ניסוחים פורמליים שהרופא לא השתמש בהם.
+- אם הרופא לא נתן סיכום מפורש — סכם בקצרה ובצורה עובדתית את מה שנדון, בלי פרשנות.
+- **אל תשנה את גיל המטופל** — אם הרופא אמר "בן 79" בסיכום שלו, כתוב 79, לא 80.
+
 ### 2. תרופות — דיוק מוחלט
 - רשום **רק** תרופות שהוזכרו במפורש בתמלול.
 - **אסור** להוסיף תרופות שלא נאמרו, גם אם הן "הגיוניות" לפי האבחנה.
@@ -312,6 +325,39 @@ SYSTEM_PROMPT = """אתה מערכת לסיכום רפואי מדויק. תפק�
 """
 
 
+FIX_PROMPT = """אתה מערכת תיקון סיכומים רפואיים. קיבלת שלושה דברים:
+1. תמלול מקורי של שיחה רופא-מטופל
+2. סיכום רפואי שנוצר מהתמלול
+3. רשימת בעיות שזוהו בסיכום
+
+## כללי תיקון:
+
+### עיקרון מנחה: אל תזיק
+- תקן **רק** את הבעיות שצוינו ברשימה. אל תשנה שום דבר אחר בסיכום.
+- שמור על **אותו מבנה, אותן כותרות, אותו סדר** בדיוק.
+- אם הסרת מידע, **אל תשאיר שורה ריקה** — נקה את המבנה.
+- אם הסרת מידע מסעיף "מחלות ברקע" ונשארו מחלות אחרות, השאר את הרשימה ללא הפריט שהוסר.
+- אם אין מה לרשום בסעיף מסוים אחרי ההסרה, כתוב "לא צוין".
+
+### מה לעשות עם כל סוג בעיה:
+
+**מידע שלא הוזכר בתמלול (fabricated_info):**
+- הסר את המידע המדויק שצוין כבעיה.
+- **אל תמציא מידע חלופי** — אם הסרת משהו, פשוט תמחק אותו.
+- דוגמה: אם צוין שאבלציה בעבר לא הוזכרה בתמלול: הסר את האזכור של "אבלציה" מהסיכום.
+- דוגמה: אם צוין ש"דיון נרחב" לא היה — שנה ל"הרופא הסביר" או "נדונה" במקום.
+
+**ניסוח מוטה (פרשנות שאינה בתמלול):**
+- שנה את הניסוח כך שישקף את מה שנאמר בתמלול, לא פרשנות.
+- דוגמה: אם "מחלוקת" לא נאמרה — שנה ל"חוסר הסכמה" או תאר את המצב כפי שנאמר.
+
+### חשוב מאוד:
+- **אל תוסיף** שום מידע חדש שלא היה בסיכום המקורי.
+- **אל תשנה** תרופות, מינונים, בדיקות, או המלצות שלא צוינו כבעיה.
+- **שמור על השפה** — אם הסיכום בעברית, התיקון בעברית.
+- החזר את הסיכום המתוקן **בלבד**, ללא הסברים נוספים.
+"""
+
 VALIDATION_PROMPT = """אתה מערכת בקרת איכות לסיכום רפואי. 
 קיבלת שני דברים:
 1. תמלול מקורי של שיחה רופא-מטופל
@@ -381,6 +427,7 @@ class MedicalSummaryReport:
     meds_in_transcript: List[str] = field(default_factory=list)
     meds_in_summary: List[str] = field(default_factory=list)
     deterministic_duplicate_pairs: List[Tuple[str, str]] = field(default_factory=list)
+    deterministic_duplicate_groups: List[List[str]] = field(default_factory=list)
     deterministic_dosage_warnings: List[str] = field(default_factory=list)
     unrecognized_medications: List[str] = field(default_factory=list)
     unrecognized_conditions: List[str] = field(default_factory=list)
@@ -399,6 +446,7 @@ class MedicalSummaryReport:
             "meds_in_transcript": self.meds_in_transcript,
             "meds_in_summary": self.meds_in_summary,
             "deterministic_duplicate_pairs": [list(p) for p in self.deterministic_duplicate_pairs],
+            "deterministic_duplicate_groups": self.deterministic_duplicate_groups,
             "deterministic_dosage_warnings": self.deterministic_dosage_warnings,
             "unrecognized_medications": self.unrecognized_medications,
             "unrecognized_conditions": self.unrecognized_conditions,
@@ -453,8 +501,29 @@ class MedicalSummaryGenerator:
         llm_validation = self._call_llm_validate(transcription, raw_summary)
         self._apply_llm_validation(llm_validation)
 
+        # Step 3b: Fix-and-regenerate — if fabricated info found, ask LLM to fix
+        corrected_summary = raw_summary
+        if self.report.fabricated_info:
+            if trace:
+                trace.start_timer("step_6c_summary_fix")
+
+            corrected_summary = self._call_llm_fix(
+                transcription, raw_summary, self.report.fabricated_info
+            )
+
+            if trace:
+                trace.add_step(
+                    "step_6c_summary_fix", corrected_summary,
+                    metadata={
+                        "task": "summary_fix",
+                        "issues_fixed": len(self.report.fabricated_info),
+                        "original_summary_length": len(raw_summary),
+                        "corrected_summary_length": len(corrected_summary),
+                    }
+                )
+
         # Step 4: Apply fixes — inject warnings into summary text
-        final_summary = self._inject_warnings(raw_summary)
+        final_summary = self._inject_warnings(corrected_summary)
 
         self.report.summary_text = final_summary
         self.report.validation_passed = (
@@ -500,6 +569,39 @@ class MedicalSummaryGenerator:
             ],
         )
         return response.choices[0].message.content.strip()
+
+    def _call_llm_fix(
+        self, transcription: str, summary: str, issues: List[str]
+    ) -> str:
+        """Ask GPT-5.2 to fix identified issues in the summary."""
+        issues_text = "\n".join(f"- {issue}" for issue in issues)
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-5.2-chat",
+                messages=[
+                    {"role": "system", "content": FIX_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            "## תמלול מקורי:\n\n"
+                            f"{transcription}\n\n"
+                            "## סיכום רפואי לתיקון:\n\n"
+                            f"{summary}\n\n"
+                            "## בעיות שזוהו (יש לתקן רק אותן):\n\n"
+                            f"{issues_text}"
+                        ),
+                    },
+                ],
+            )
+            fixed = response.choices[0].message.content.strip()
+            # Sanity check: if the fixed summary is too short or empty, keep original
+            if len(fixed) < len(summary) * 0.5:
+                print("   ⚠️  Fixed summary too short, keeping original")
+                return summary
+            return fixed
+        except Exception as e:
+            print(f"   ⚠️  LLM fix failed: {e}")
+            return summary
 
     def _call_llm_validate(self, transcription: str, summary: str) -> dict:
         """Ask GPT-5.2 to cross-check the summary against the transcript."""
@@ -569,6 +671,9 @@ class MedicalSummaryGenerator:
                 found_groups[group_idx] = found_names
 
         for group_idx, names in found_groups.items():
+            # Store the full group for display (one warning per group)
+            self.report.deterministic_duplicate_groups.append(list(names))
+            # Also store pairs for backward compatibility in serialization
             for i in range(len(names)):
                 for j in range(i + 1, len(names)):
                     pair = (names[i], names[j])
@@ -640,11 +745,18 @@ class MedicalSummaryGenerator:
                     f"⚠️ תרופה שייתכן שלא הוזכרה בתמלול: {med}"
                 )
 
-        if self.report.deterministic_duplicate_pairs:
-            for name1, name2 in self.report.deterministic_duplicate_pairs:
-                warnings_section.append(
-                    f"⚠️ כפילות תרופתית אפשרית: {name1} ו-{name2} הן ככל הנראה אותה תרופה"
-                )
+        if self.report.deterministic_duplicate_groups:
+            for group in self.report.deterministic_duplicate_groups:
+                if len(group) == 2:
+                    warnings_section.append(
+                        f"⚠️ כפילות תרופתית אפשרית: {group[0]} ו-{group[1]} הן ככל הנראה אותה תרופה"
+                    )
+                else:
+                    # Join all but last with ", " and last with " ו-"
+                    all_but_last = ", ".join(group[:-1])
+                    warnings_section.append(
+                        f"⚠️ כפילות תרופתית אפשרית: {all_but_last} ו-{group[-1]} הן ככל הנראה אותה תרופה"
+                    )
 
         if self.report.deterministic_dosage_warnings:
             for warning in self.report.deterministic_dosage_warnings:
@@ -708,9 +820,9 @@ def format_summary_report(report: MedicalSummaryReport) -> str:
 
     if report.hallucinated_medications:
         parts.append(f"   ⚠️  Hallucinated meds: {', '.join(report.hallucinated_medications)}")
-    if report.deterministic_duplicate_pairs:
-        pairs = [f"{a}={b}" for a, b in report.deterministic_duplicate_pairs]
-        parts.append(f"   ⚠️  Duplicate meds: {', '.join(pairs)}")
+    if report.deterministic_duplicate_groups:
+        groups = [" / ".join(g) for g in report.deterministic_duplicate_groups]
+        parts.append(f"   ⚠️  Duplicate meds: {'; '.join(groups)}")
     if report.deterministic_dosage_warnings:
         parts.append(f"   ⚠️  Dosage warnings: {len(report.deterministic_dosage_warnings)}")
         for w in report.deterministic_dosage_warnings:

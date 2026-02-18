@@ -200,9 +200,9 @@ export default function MedicalSummaryView({ runId }: Props) {
                   💊 {report.hallucinated_medications!.length} תרופות חשודות
                 </span>
               )}
-              {(report.deterministic_duplicate_pairs?.length ?? 0) > 0 && (
+              {(report.deterministic_duplicate_groups?.length ?? 0) > 0 && (
                 <span className="chip chip-warning">
-                  🔄 {report.deterministic_duplicate_pairs!.length} כפילויות
+                  🔄 {report.deterministic_duplicate_groups!.length} כפילויות
                 </span>
               )}
               {(report.deterministic_dosage_warnings?.length ?? 0) > 0 && (

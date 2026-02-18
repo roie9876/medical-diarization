@@ -71,6 +71,7 @@ export interface SummaryReport {
   meds_in_transcript: string[];
   meds_in_summary: string[];
   deterministic_duplicate_pairs: string[][];
+  deterministic_duplicate_groups: string[][];
   deterministic_dosage_warnings: string[];
   validation_passed: boolean;
 }
