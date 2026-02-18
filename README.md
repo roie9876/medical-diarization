@@ -13,7 +13,7 @@ Key capabilities:
 - **Long audio support** — splits files >4 minutes into overlapping chunks processed in parallel
 - **Hebrew spelling correction** — fixes common GPT transcription errors with a curated dictionary
 - **Validation & audit trail** — every post-processing change is logged and numbers/terms are verified
-- **Structured medical summary** — auto-generates a Hebrew clinical summary with built-in hallucination detection, medication duplicate detection, dosage plausibility checks, ATC medication verification, and ICD condition verification
+- **Structured medical summary** — auto-generates a Hebrew clinical summary with built-in hallucination detection, medication duplicate detection, dosage plausibility checks, ATC medication verification, ICD condition verification, and automatic fix-and-regenerate for detected issues
 - **Pipeline tracing** — captures text state at every processing step for debugging and comparison
 - **Web UI** — upload audio, watch pipeline progress live, browse step-by-step diffs with grouped sidebar and hunk-based change viewer, re-run pipelines
 
@@ -64,7 +64,8 @@ flowchart TD
         direction TB
         K1["6a · Summary Generation<br/>GPT-5.2<br/>Structured Hebrew summary"]
         K2["6b · Validation<br/>✓ Duplicate meds<br/>✓ Dosage plausibility<br/>✓ ATC medication verification<br/>✓ ICD condition verification<br/>✓ Hallucination detection<br/>✓ Faithfulness score"]
-        K1 --> K2
+        K3["6c · Fix & Regenerate<br/>GPT-5.2<br/>Auto-correct fabricated info<br/>(conditional)"]
+        K1 --> K2 --> K3
     end
 
     K --> J["📄 Output<br/>final_transcription.txt<br/>medical_summary.txt<br/>summary_report.json"]
@@ -422,7 +423,7 @@ Step 5e (Validate):  ✓ PET-CT preserved, no numbers lost
 
 ## Step 6 — Medical Summary Generation (Detailed)
 
-After post-processing, the pipeline generates a **structured Hebrew medical summary** from the final transcription. This is a two-step process with extensive safety guards.
+After post-processing, the pipeline generates a **structured Hebrew medical summary** from the final transcription. This is a three-step process: generation, validation, and conditional fix-and-regenerate.
 
 ### Step 6a — Summary Generation (GPT-5.2)
 
@@ -465,6 +466,22 @@ Two-layer quality control:
 | **Fabricated information** | Detects any data in the summary not grounded in the transcript |
 | **Chief complaint accuracy** | Verifies the chief complaint matches the actual reason for the visit |
 | **Faithfulness score** | 0–10 overall faithfulness rating |
+
+### Step 6c — Fix & Regenerate (GPT-5.2, conditional)
+
+If Step 6b detects **fabricated information** (`fabricated_info` is non-empty), the summary is sent back to GPT-5.2 with a dedicated `FIX_PROMPT` that instructs:
+
+- Fix **only** the specific issues identified — don't change anything else
+- Remove fabricated info without inventing replacements
+- Keep the same structure, headings, order, and language
+- If removing content leaves a section empty, write "לא צוין"
+
+**Safety guards:**
+- If the corrected summary is less than 50% of the original length → keep original (prevents catastrophic edits)
+- If the LLM call fails → keep original (try/except fallback)
+- Traced as `step_6c_summary_fix` with metadata (issues fixed, length before/after)
+
+If no fabricated info is found, Step 6c is skipped entirely.
 
 #### Output
 
@@ -756,7 +773,7 @@ typescript, vite
 ┌─────────────┐ ┌────────────┐ ┌───────────────┐
 │ transcribe  │ │ postprocess│ │ medical_      │
 │ .py         │ │ .py        │ │ summary.py    │
-│ Steps 0-4   │ │ Step 5 A-E │ │ Step 6a-6b    │
+│ Steps 0-4   │ │ Step 5 A-E │ │ Step 6a-6c    │
 │ GPT-Audio   │ │ GPT-5.2    │ │ GPT-5.2       │
 │ + GPT-5.2   │ │            │ │ + deterministic│
 └─────────────┘ └────────────┘ └───────────────┘
@@ -782,7 +799,7 @@ typescript, vite
 |------|---------|-------|-------|
 | `src/medical_transcription/transcribe.py` | Main pipeline orchestrator | ~690 | `MedicalTranscriber` class, ThreadPoolExecutor for parallel Steps 1+2, STT background thread |
 | `src/medical_transcription/postprocess.py` | Post-processing stages A-E | ~400 | All 5 stages with trace integration |
-| `src/medical_transcription/medical_summary.py` | Medical summary + validation | ~480 | `MedicalSummaryGenerator`, medication equivalences, dosage ranges, dual-layer validation, ATC medication verification, ICD condition verification |
+| `src/medical_transcription/medical_summary.py` | Medical summary + validation + fix | ~580 | `MedicalSummaryGenerator`, medication equivalences, dosage ranges, dual-layer validation, ATC medication verification, ICD condition verification, Step 6c fix-and-regenerate |
 | `src/medical_transcription/trace.py` | Pipeline trace data layer | ~190 | `PipelineTrace`, `StepSnapshot`, 12 `STEP_DEFINITIONS` |
 | `web/backend/main.py` | FastAPI backend | ~500 | All endpoints, job queue, file serving |
 | `web/frontend/src/components/TraceViewer.tsx` | Step trace viewer | ~150 | `audioRef` shared with AudioPlayer |
