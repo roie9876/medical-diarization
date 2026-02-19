@@ -58,6 +58,7 @@ export interface AdminStatus {
 export interface AudioInfo {
   has_audio: boolean;
   filename: string | null;
+  duration: number | null;
 }
 
 export interface SummaryReport {

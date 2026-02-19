@@ -14,6 +14,7 @@ import sys
 import base64
 import json
 import tempfile
+import subprocess
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
@@ -59,6 +60,56 @@ class MedicalTranscriber:
         """Encode audio file to base64"""
         with open(audio_path, "rb") as f:
             return base64.standard_b64encode(f.read()).decode("utf-8")
+
+    @staticmethod
+    def _detect_real_format(audio_path: str) -> str:
+        """Detect real audio format by reading magic bytes."""
+        with open(audio_path, "rb") as f:
+            header = f.read(16)
+        if header[:4] == b"\x1a\x45\xdf\xa3":
+            return "webm"
+        if header[:4] == b"RIFF" and header[8:12] == b"WAVE":
+            return "wav"
+        if header[:4] == b"OggS":
+            return "ogg"
+        if header[:4] == b"fLaC":
+            return "flac"
+        if header[:3] == b"ID3" or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+            return "mp3"
+        if len(header) >= 8 and header[4:8] == b"ftyp":
+            return "mp4"
+        return os.path.splitext(audio_path)[1][1:].lower() or "mp3"
+
+    @staticmethod
+    def ensure_compatible_audio(audio_path: str, temp_dir: str = None) -> str:
+        """
+        Ensure the audio file is in a format supported by the API.
+        If the file is misnamed (e.g. WebM with .wav extension), convert
+        it to real WAV (PCM 16-bit, 16kHz mono) using ffmpeg.
+        Returns the path to use (original or converted).
+        """
+        real_fmt = MedicalTranscriber._detect_real_format(audio_path)
+        extension = os.path.splitext(audio_path)[1][1:].lower()
+
+        # If real format matches extension, no conversion needed
+        if real_fmt == extension:
+            return audio_path
+
+        print(f"   ⚠️  File '{os.path.basename(audio_path)}' has extension .{extension} "
+              f"but is actually {real_fmt.upper()}. Converting to real WAV...")
+
+        if temp_dir is None:
+            temp_dir = tempfile.mkdtemp(prefix="audio_convert_")
+
+        out_path = os.path.join(temp_dir, os.path.splitext(os.path.basename(audio_path))[0] + "_converted.wav")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", audio_path,
+             "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
+             out_path],
+            capture_output=True, check=True, timeout=120,
+        )
+        print(f"   ✅ Converted to: {out_path}")
+        return out_path
     
     def get_audio_duration_ms(self, audio_path: str) -> int:
         """Get audio duration in milliseconds"""
@@ -379,7 +430,10 @@ class MedicalTranscriber:
         print(f"\n   📍 Chunk {chunk_num}/{total_chunks}")
         
         chunk_idx = chunk_num - 1  # 0-based for trace
-        audio_format = os.path.splitext(audio_path)[1][1:].lower() or "mp3"
+        audio_format = self._detect_real_format(audio_path)
+        # Normalize format names for the API
+        if audio_format in ("webm", "mp4", "m4a"):
+            audio_format = "mp3"  # not expected after conversion, but safety net
         audio_base64 = self.encode_audio(audio_path)
         
         # Steps 1 & 2 run in PARALLEL (independent API calls)
@@ -454,6 +508,9 @@ class MedicalTranscriber:
         
         # Create temp directory for chunks
         with tempfile.TemporaryDirectory() as temp_dir:
+            # Ensure audio is in a compatible format (convert WebM→WAV etc.)
+            audio_path = self.ensure_compatible_audio(audio_path, temp_dir)
+
             # Split audio if needed
             chunks = self.split_audio(audio_path, temp_dir)
             total_chunks = len(chunks)

@@ -16,13 +16,14 @@ import json
 import uuid
 import shutil
 import asyncio
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 # Add source to path
@@ -402,25 +403,132 @@ def _find_audio_for_run(run_id: str) -> Optional[Path]:
     return None
 
 
+def _detect_media_type(file_path: Path) -> str:
+    """Detect real MIME type by reading magic bytes, don't trust extension."""
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(16)
+    except Exception:
+        header = b""
+    # WebM starts with 0x1A45DFA3 (EBML header)
+    if header[:4] == b"\x1a\x45\xdf\xa3":
+        return "audio/webm"
+    # RIFF/WAV
+    if header[:4] == b"RIFF" and header[8:12] == b"WAVE":
+        return "audio/wav"
+    # Ogg
+    if header[:4] == b"OggS":
+        return "audio/ogg"
+    # fLaC
+    if header[:4] == b"fLaC":
+        return "audio/flac"
+    # MP3: ID3 tag or sync word
+    if header[:3] == b"ID3" or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+        return "audio/mpeg"
+    # MP4/M4A: ftyp box
+    if len(header) >= 8 and header[4:8] == b"ftyp":
+        return "audio/mp4"
+    # Fallback to extension
+    ext_map = {
+        ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
+        ".flac": "audio/flac", ".ogg": "audio/ogg", ".webm": "audio/webm",
+    }
+    return ext_map.get(file_path.suffix.lower(), "audio/mpeg")
+
+
+def _get_audio_duration(file_path: Path) -> Optional[float]:
+    """Get audio duration in seconds via ffprobe."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "format=duration", "-of", "csv=p=0",
+             str(file_path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        val = result.stdout.strip()
+        if val and val != "N/A":
+            return float(val)
+    except Exception:
+        pass
+    # Fallback: try counting packets (for WebM/Opus with unknown duration)
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0",
+             "-count_packets", "-show_entries", "stream=nb_read_packets,codec_name,sample_rate",
+             "-of", "json", str(file_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        info = json.loads(result.stdout)
+        stream = info.get("streams", [{}])[0]
+        packets = int(stream.get("nb_read_packets", 0))
+        codec = stream.get("codec_name", "")
+        if packets and codec == "opus":
+            # Opus default frame = 20ms
+            return packets * 0.020
+    except Exception:
+        pass
+    return None
+
+
 @app.get("/api/runs/{run_id}/audio")
-def get_run_audio(run_id: str):
-    """Stream the audio file associated with a pipeline run."""
+def get_run_audio(run_id: str, request: Request):
+    """Stream the audio file with HTTP Range support for seeking."""
     audio_path = _find_audio_for_run(run_id)
     if not audio_path:
         raise HTTPException(404, f"No audio file found for run '{run_id}'")
-    media_types = {
-        ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
-        ".flac": "audio/flac", ".ogg": "audio/ogg",
-    }
-    media_type = media_types.get(audio_path.suffix.lower(), "audio/mpeg")
-    return FileResponse(audio_path, media_type=media_type, filename=audio_path.name)
+    media_type = _detect_media_type(audio_path)
+    file_size = audio_path.stat().st_size
+
+    range_header = request.headers.get("range")
+    if range_header:
+        # Parse Range: bytes=start-end
+        range_spec = range_header.strip().split("=")[1]
+        range_parts = range_spec.split("-")
+        start = int(range_parts[0]) if range_parts[0] else 0
+        end = int(range_parts[1]) if range_parts[1] else file_size - 1
+        end = min(end, file_size - 1)
+        content_length = end - start + 1
+
+        def iter_range():
+            with open(audio_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk = f.read(min(8192, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        return StreamingResponse(
+            iter_range(),
+            status_code=206,
+            media_type=media_type,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(content_length),
+                "Content-Disposition": f'inline; filename="{audio_path.name}"',
+            },
+        )
+
+    # No Range header — return full file with Accept-Ranges hint
+    return FileResponse(
+        audio_path,
+        media_type=media_type,
+        filename=audio_path.name,
+        headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
+    )
 
 
 @app.get("/api/runs/{run_id}/has-audio")
 def check_run_audio(run_id: str):
-    """Check if audio exists for a run (lightweight, no streaming)."""
+    """Check if audio exists for a run, including duration."""
     audio_path = _find_audio_for_run(run_id)
-    return {"has_audio": audio_path is not None, "filename": audio_path.name if audio_path else None}
+    if not audio_path:
+        return {"has_audio": False, "filename": None, "duration": None}
+    dur = _get_audio_duration(audio_path)
+    return {"has_audio": True, "filename": audio_path.name, "duration": dur}
 
 
 @app.get("/api/runs/{run_id}/medical-summary")

@@ -18,40 +18,84 @@ export default function AudioPlayer({ runId, audioRef }: Props) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [serverDuration, setServerDuration] = useState<number | null>(null);
   const [seeking, setSeeking] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setHasAudio(null);
+    setServerDuration(null);
+    setDuration(0);
+    setCurrentTime(0);
     api
       .checkAudio(runId)
       .then((info) => {
         setHasAudio(info.has_audio);
         setFilename(info.filename);
+        if (info.duration && info.duration > 0) {
+          setServerDuration(info.duration);
+          setDuration(info.duration);
+        }
       })
       .catch(() => setHasAudio(false));
   }, [runId]);
+
+  // Use a ref to track seeking so event handlers always see latest value
+  const seekingRef = useRef(false);
+  const durationResolved = useRef(false);
+
+  // Keep seekingRef in sync with state
+  useEffect(() => {
+    seekingRef.current = seeking;
+  }, [seeking]);
 
   // Sync state from <audio> element
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    durationResolved.current = !!serverDuration;
+
+    const setValidDuration = (d: number) => {
+      // Only update duration from browser if we don't have server duration
+      if (!serverDuration && d && isFinite(d) && d > 0) {
+        setDuration(d);
+        durationResolved.current = true;
+      }
+    };
 
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onTime = () => {
-      if (!seeking) {
+      if (!seekingRef.current) {
         setCurrentTime(audio.currentTime);
       }
+      if (!durationResolved.current) {
+        setValidDuration(audio.duration);
+      }
     };
-    const onDur = () => setDuration(audio.duration || 0);
-    const onLoaded = () => setDuration(audio.duration || 0);
+    const onDur = () => setValidDuration(audio.duration);
+    const onLoaded = () => {
+      if (!serverDuration) {
+        if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
+          setValidDuration(audio.duration);
+        } else {
+          // WebM/Opus files often report Infinity duration.
+          // Trick: seek to a huge time — the browser resolves the real duration.
+          audio.currentTime = 1e10;
+        }
+      }
+    };
 
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("durationchange", onDur);
     audio.addEventListener("loadedmetadata", onLoaded);
+
+    // If metadata is already loaded (cached), fire manually
+    if (audio.readyState >= 1) {
+      onLoaded();
+    }
 
     return () => {
       audio.removeEventListener("play", onPlay);
@@ -60,7 +104,7 @@ export default function AudioPlayer({ runId, audioRef }: Props) {
       audio.removeEventListener("durationchange", onDur);
       audio.removeEventListener("loadedmetadata", onLoaded);
     };
-  }, [audioRef, seeking]);
+  }, [audioRef, runId, serverDuration]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -84,30 +128,33 @@ export default function AudioPlayer({ runId, audioRef }: Props) {
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      // Capture on the track div itself, not e.target (which might be a child)
+      trackRef.current?.setPointerCapture(e.pointerId);
       setSeeking(true);
       const t = getTimeFromPointer(e.clientX);
       setCurrentTime(t);
-    },
-    [getTimeFromPointer],
-  );
-
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (!seeking) return;
-      const t = getTimeFromPointer(e.clientX);
-      setCurrentTime(t);
-      // Live-update the audio position while dragging (throttled by pointer events)
       if (audioRef.current) {
         audioRef.current.currentTime = t;
       }
     },
-    [seeking, getTimeFromPointer, audioRef],
+    [getTimeFromPointer, audioRef],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!seekingRef.current) return;
+      const t = getTimeFromPointer(e.clientX);
+      setCurrentTime(t);
+      if (audioRef.current) {
+        audioRef.current.currentTime = t;
+      }
+    },
+    [getTimeFromPointer, audioRef],
   );
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
-      if (!seeking) return;
+      if (!seekingRef.current) return;
       const t = getTimeFromPointer(e.clientX);
       if (audioRef.current) {
         audioRef.current.currentTime = t;
@@ -115,14 +162,14 @@ export default function AudioPlayer({ runId, audioRef }: Props) {
       setSeeking(false);
       setCurrentTime(t);
     },
-    [seeking, getTimeFromPointer, audioRef],
+    [getTimeFromPointer, audioRef],
   );
 
   // Skip ±5s with keyboard arrows or buttons
   const skip = (delta: number) => {
     const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + delta));
+    if (!audio || !duration) return;
+    audio.currentTime = Math.max(0, Math.min(duration, audio.currentTime + delta));
   };
 
   if (hasAudio === null || !hasAudio) return null;
@@ -133,7 +180,7 @@ export default function AudioPlayer({ runId, audioRef }: Props) {
   return (
     <div className="custom-audio-player">
       {/* Hidden native audio element (used as the playback engine) */}
-      <audio ref={audioRef} preload="metadata" src={audioUrl} />
+      <audio ref={audioRef} preload="auto" src={audioUrl} />
 
       <div className="player-row">
         {/* Skip back */}
